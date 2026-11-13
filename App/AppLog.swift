@@ -3,7 +3,11 @@ import RelayCore
 
 /// 应用运行日志（设计方案第 6 节：~/Library/Logs/AgentRelay/）。只记启动、窗口、退出这类事件，不写信件正文。
 enum AppLog {
-    static func write(_ text: String, paths: RelayPaths) {
+    /// 完全卸载删掉日志目录后关掉日志，免得退出前又把目录建回来
+    @MainActor static var disabled = false
+
+    @MainActor static func write(_ text: String, paths: RelayPaths) {
+        guard !disabled else { return }
         let file = paths.logs + "/app.log"
         if !FileManager.default.fileExists(atPath: file) {
             FileManager.default.createFile(atPath: file, contents: nil, attributes: [.posixPermissions: 0o600])

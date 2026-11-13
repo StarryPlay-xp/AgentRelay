@@ -9,6 +9,8 @@ final class AppRuntime {
     let paths: RelayPaths
     private(set) var store: Store?
     private(set) var service: RelayService?
+    /// 接入向导（设计方案第 13 节）
+    private(set) var integrations: Integrations?
     private(set) var discovery = ProjectDiscovery.resolve()
     /// 启动失败的原因（例如已经有一个 AgentRelay 在运行）
     private(set) var startupError: String?
@@ -74,6 +76,9 @@ final class AppRuntime {
             self.store = store
             self.service = service
             self.server = server
+            integrations = Integrations(paths: paths, store: store,
+                                        codexExecutable: { CodexCLI.locate(configuredPath: store.codexPath()) },
+                                        claudeExecutable: { ClaudeCLI.locate(configuredPath: store.claudePath()) })
         } catch let e as RelayError {
             startupError = e.message
             return
@@ -93,6 +98,18 @@ final class AppRuntime {
     func stop() {
         timer?.invalidate()
         server?.stop()
+    }
+
+    /// 完全卸载删除文件之前：停掉中转服务和定时检查、关掉数据库、放开单实例锁，之后不再写日志
+    func shutdownForUninstall() {
+        stop()
+        store?.close()
+        server = nil
+        service = nil
+        integrations = nil
+        store = nil
+        instanceLock = nil
+        AppLog.disabled = true
     }
 
     /// 在 bin/ 下建指向应用包内两个程序的符号链接（设计方案第 6 节）；链接指错了就改正。返回问题说明，没问题返回 nil。

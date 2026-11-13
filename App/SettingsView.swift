@@ -3,7 +3,7 @@ import RelayCore
 import ServiceManagement
 import SwiftUI
 
-/// 设置：各项上限、保留期、codex 程序路径、通知、登录时启动（设计方案第 16 节；完全卸载在第 4 步）。
+/// 设置：各项上限、保留期、codex 和 claude 程序路径、通知、登录时启动、数据位置和完全卸载（设计方案第 16 节、第 6.3 节）。
 /// 每一节左边写这一节管什么，右边是控件。每一节拆成独立视图：整页写在一个视图里时，Swift 编译器会因类型过大而崩溃。
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -16,19 +16,21 @@ struct SettingsView: View {
                 Hairline()
                 CodexSection(model: model)
                 Hairline()
+                ClaudeSection(model: model)
+                Hairline()
                 NotificationSection()
                 Hairline()
                 LoginSection(model: model)
                 Hairline()
-                DataSection(paths: model.runtime.paths)
+                DataSection(model: model)
             }
             .pagePadding()
         }
     }
 }
 
-/// 一节设置：左栏标题和说明，右栏控件
-private struct SettingsBlock<Content: View>: View {
+/// 一节设置：左栏标题和说明，右栏控件（“接入”页也用）
+struct SettingsBlock<Content: View>: View {
     let title: String
     let note: String
     @ViewBuilder var content: Content
@@ -170,6 +172,50 @@ private struct CodexSection: View {
     }
 }
 
+private struct ClaudeSection: View {
+    @Bindable var model: AppModel
+    @State private var path = ""
+    @State private var loaded = false
+
+    var body: some View {
+        SettingsBlock(title: "claude 程序", note: "接入 Claude 时要用它运行官方命令。一般不用填，AgentRelay 会自己找。") {
+            HStack(spacing: 8) {
+                TextField("留空则自动查找", text: $path).inkField()
+                Button("选择…", action: choose).buttonStyle(.inkOutline)
+                Button("保存") {
+                    model.perform { try model.store?.setClaudePath(path.isEmpty ? nil : path) }
+                    model.refreshIntegrations([.claude])
+                }
+                .buttonStyle(.inkFilled)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("现在会用").font(Fonts.small).foregroundStyle(Palette.ink3)
+                if let found = ClaudeCLI.locate(configuredPath: path.isEmpty ? nil : path) {
+                    Text(found).font(Fonts.mono(12, weight: .regular)).foregroundStyle(Palette.ink).textSelection(.enabled)
+                } else {
+                    Text("找不到 claude 程序").font(Fonts.small.weight(.medium)).foregroundStyle(Palette.bad)
+                }
+            }
+            Text("先用这里填的；没填就找命令行装的 claude（~/.local/bin、Homebrew 等位置），最后才用 Claude 桌面版自带的那份。")
+                .font(Fonts.small)
+                .foregroundStyle(Palette.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onAppear {
+            guard !loaded else { return }
+            path = model.store?.claudePath() ?? ""
+            loaded = true
+        }
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url { path = url.path }
+    }
+}
+
 private struct NotificationSection: View {
     @AppStorage(Notifier.enabledKey) private var enabled = true
 
@@ -204,7 +250,9 @@ private struct LoginSection: View {
 }
 
 private struct DataSection: View {
-    let paths: RelayPaths
+    @Bindable var model: AppModel
+    @State private var uninstalling = false
+    private var paths: RelayPaths { model.runtime.paths }
 
     var body: some View {
         SettingsBlock(title: "数据位置", note: "信件、登记表和日志都只存在这台电脑上。") {
@@ -213,12 +261,17 @@ private struct DataSection: View {
                 row("数据库", paths.database)
                 row("日志", paths.logs)
             }
-            Button("在访达中显示") {
-                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: paths.home)])
+            HStack(spacing: 12) {
+                Button("在访达中显示") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: paths.home)])
+                }
+                .buttonStyle(.inkOutline)
+                Button("完全卸载…") { uninstalling = true }
+                    .buttonStyle(.inkDanger)
+                    .disabled(model.runtime.integrations == nil)
             }
-            .buttonStyle(.inkOutline)
-            Text("“完全卸载”会在配置向导里提供（开发计划第 4 步）。").font(Fonts.small).foregroundStyle(Palette.ink3)
         }
+        .sheet(isPresented: $uninstalling) { UninstallSheet(model: model) }
     }
 
     private func row(_ label: String, _ value: String) -> some View {

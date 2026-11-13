@@ -369,6 +369,16 @@ struct IntegrationsTests {
         #expect(!FileManager.default.fileExists(atPath: d.paths.logs))
     }
 
+    @Test("设置里的 claude 程序位置：保存、读回、清空")
+    func claudePathSetting() throws {
+        let h = try IntegrationHarness()
+        #expect(h.store.claudePath() == nil)
+        try h.store.setClaudePath("/示例/claude")
+        #expect(h.store.claudePath() == "/示例/claude")
+        try h.store.setClaudePath("")
+        #expect(h.store.claudePath() == nil)
+    }
+
     @Test("数据库关掉后再用会报错，不会悄悄重建文件")
     func storeClose() throws {
         let h = try IntegrationHarness()

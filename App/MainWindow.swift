@@ -2,9 +2,9 @@ import AppKit
 import RelayCore
 import SwiftUI
 
-/// 主窗口的页面（设计方案第 16 节；配置向导在第 4 步）
+/// 主窗口的页面（设计方案第 16 节）
 enum Page: String, CaseIterable, Identifiable {
-    case overview, projects, sessions, messages, settings
+    case overview, projects, sessions, messages, setup, settings
 
     var id: String { rawValue }
 
@@ -14,6 +14,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .projects: return "项目与分组"
         case .sessions: return "会话"
         case .messages: return "消息"
+        case .setup: return "接入"
         case .settings: return "设置"
         }
     }
@@ -73,6 +74,7 @@ struct MainWindow: View {
             case .projects: ProjectsView(model: model)
             case .sessions: SessionsView(model: model)
             case .messages: MessagesView(model: model, selection: $openMessage)
+            case .setup: SetupView(model: model)
             case .settings: SettingsView(model: model)
             }
         }
@@ -81,7 +83,7 @@ struct MainWindow: View {
 
 // MARK: - 侧边栏
 
-/// 侧边栏：字样和运行状态、五个页面（⌘1～⌘5）、底部的“全部暂停”
+/// 侧边栏：字样和运行状态、六个页面（⌘1～⌘6）、底部的“全部暂停”
 private struct Sidebar: View {
     @Bindable var model: AppModel
     @Binding var page: Page

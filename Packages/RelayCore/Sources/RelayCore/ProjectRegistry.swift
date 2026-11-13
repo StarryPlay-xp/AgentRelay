@@ -264,6 +264,19 @@ extension Store {
         }
     }
 
+    /// 设置里填的 claude 程序位置（接入向导用；没填时自动查找，见 `ClaudeCLI.locate`）
+    public func claudePath() -> String? {
+        (try? locked { try metaValue("claude_path") }).flatMap { $0?.isEmpty == false ? $0 : nil }
+    }
+
+    public func setClaudePath(_ path: String?) throws {
+        try locked {
+            if let path, !path.isEmpty { try setMeta("claude_path", path) } else {
+                try db.query("DELETE FROM meta WHERE key = 'claude_path'")
+            }
+        }
+    }
+
     // MARK: 工具
 
     static func cleanName(_ s: String, what: String) throws -> String {

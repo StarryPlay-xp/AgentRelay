@@ -274,8 +274,10 @@ public final class Integrations: @unchecked Sendable {
         }.joined(separator: " ")
     }
 
-    public func preview(_ p: Platform) -> IntegrationPreview {
-        let st = status(p)
+    public func preview(_ p: Platform) -> IntegrationPreview { preview(p, status: status(p)) }
+
+    /// 用已经查到的状态生成预览，不再运行命令（界面在主线程上用）
+    public func preview(_ p: Platform, status st: IntegrationStatus) -> IntegrationPreview {
         let exeName = st.executable ?? tool(p)
         var commands: [String] = []
         if case .pointsElsewhere = st.state { commands.append(Self.display(exeName, removeArguments(p))) }
@@ -301,7 +303,12 @@ public final class Integrations: @unchecked Sendable {
 
     /// 一键失败时给你照着做的命令（第 13.4 节）
     public func manualSteps(_ p: Platform) -> (install: [String], uninstall: [String]) {
-        let exeName = executable(p) ?? tool(p)
+        manualSteps(p, executable: executable(p))
+    }
+
+    /// 同上，程序位置由调用方给出（界面用已经查到的状态，不再查找）
+    public func manualSteps(_ p: Platform, executable: String?) -> (install: [String], uninstall: [String]) {
+        let exeName = executable ?? tool(p)
         return ([Self.display(exeName, addArguments(p))], [Self.display(exeName, removeArguments(p))])
     }
 
@@ -523,6 +530,12 @@ public struct UninstallStep: Sendable, Equatable {
     public let title: String
     public let ok: Bool
     public let detail: String
+
+    public init(title: String, ok: Bool, detail: String) {
+        self.title = title
+        self.ok = ok
+        self.detail = detail
+    }
 }
 
 public enum FullUninstall {

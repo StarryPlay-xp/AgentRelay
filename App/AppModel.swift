@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RelayCore
+import ServiceManagement
 
 /// 界面用的数据：每 2 秒以及每次操作后从数据库刷新。所有修改都经过 RelayCore 的方法。
 @Observable
@@ -23,6 +24,17 @@ final class AppModel {
     var openedAtLaunch = false
     /// 中转核心启动流程已经走完（成功或失败），界面据此做启动后的事
     var started = false
+    /// 两边的接入状态（查一次要运行 codex，所以不跟着 2 秒刷新，只在打开“接入”页和操作后查）
+    var integrationStatus: [Platform: IntegrationStatus] = [:]
+    /// 两边最近一次操作（安装、核对、卸载）的结果
+    var integrationReports: [Platform: IntegrationReport] = [:]
+    /// 正在查或正在操作的平台
+    var integrationBusy: Set<Platform> = []
+    /// 最近的配置改动记录
+    var configChanges: [ConfigChangeRow] = []
+    /// 完全卸载进行到哪一步、每步的结果
+    var uninstallPhase: UninstallPhase = .idle
+    var uninstallSteps: [UninstallStep] = []
 
     @ObservationIgnored private var timer: Timer?
 
@@ -44,6 +56,13 @@ final class AppModel {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
+        refreshIntegrations()
+    }
+
+    /// 停掉 2 秒一次的刷新（完全卸载关掉数据库之前）
+    func stopRefreshing() {
+        timer?.invalidate()
+        timer = nil
     }
 
     func refresh() {
@@ -96,5 +115,111 @@ final class AppModel {
         Envelope(messageID: m.id, chainID: m.chainID, hop: m.hop, hopLimit: store?.limits().hopLimit ?? Limits().hopLimit,
                  fromMailbox: m.fromMailbox, fromPlatform: m.fromPlatform, fromProject: m.fromProject,
                  needsReply: m.needsReply, subject: m.subject)
+    }
+}
+
+// MARK: - 接入向导和完全卸载（设计方案第 13 节、第 6.3 节）
+
+extension AppModel {
+    enum IntegrationOperation: Sendable { case install, verify, uninstall }
+
+    enum UninstallPhase: Equatable { case idle, running, failed, done }
+
+    /// 在后台查两边的接入状态（要运行 codex，不能放在主线程）
+    func refreshIntegrations(_ platforms: [Platform] = [.codex, .claude]) {
+        guard let integrations = runtime.integrations else { return }
+        configChanges = (try? store?.configChanges(limit: 20)) ?? []
+        for p in platforms where !integrationBusy.contains(p) {
+            integrationBusy.insert(p)
+            Task.detached {
+                let st = integrations.status(p)
+                await MainActor.run { [weak self] in
+                    self?.integrationStatus[p] = st
+                    self?.integrationBusy.remove(p)
+                }
+            }
+        }
+    }
+
+    /// 在后台安装、核对或卸载，做完再查一次状态
+    func runIntegration(_ op: IntegrationOperation, on p: Platform) {
+        guard let integrations = runtime.integrations, !integrationBusy.contains(p) else { return }
+        integrationBusy.insert(p)
+        integrationReports[p] = nil
+        Task.detached {
+            let report: IntegrationReport
+            switch op {
+            case .install: report = integrations.install(p)
+            case .verify: report = integrations.verify(p)
+            case .uninstall: report = integrations.uninstall(p)
+            }
+            let st = integrations.status(p)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.integrationReports[p] = report
+                self.integrationStatus[p] = st
+                self.integrationBusy.remove(p)
+                self.configChanges = (try? self.store?.configChanges(limit: 20)) ?? []
+            }
+        }
+    }
+
+    /// 两边都查过了、却一边都没接入：概览提醒你去“接入”页
+    var needsSetup: Bool {
+        guard integrationStatus.count == 2 else { return false }
+        return !integrationStatus.values.contains { $0.state == .installed }
+    }
+}
+
+extension AppModel {
+    /// 完全卸载（设计方案第 6.3 节）：先从两边移除传话工具（失败就停，什么都不删）；再关掉“登录时启动”、
+    /// 停掉中转服务、关掉数据库，删 bin/、run/；`deleteData` 为真时连数据库、备份、日志和偏好设置一起删。做完由你点“退出”。
+    func fullUninstall(deleteData: Bool) {
+        guard let integrations = runtime.integrations, uninstallPhase != .running else { return }
+        uninstallPhase = .running
+        uninstallSteps = []
+        Task.detached {
+            let steps = FullUninstall.removeIntegrations(integrations)
+            await MainActor.run { [weak self] in self?.finishUninstall(removed: steps, deleteData: deleteData) }
+        }
+    }
+
+    private func finishUninstall(removed: [UninstallStep], deleteData: Bool) {
+        uninstallSteps = removed
+        guard removed.allSatisfy({ $0.ok }) else {
+            uninstallPhase = .failed
+            refreshIntegrations()
+            return
+        }
+        uninstallSteps.append(unregisterLoginItem())
+        stopRefreshing()
+        let paths = runtime.paths
+        runtime.shutdownForUninstall()
+        let deleted = FullUninstall.deleteFiles(paths: paths, deleteData: deleteData)
+        uninstallSteps += deleted
+        if deleteData, deleted.allSatisfy({ $0.ok }) { uninstallSteps.append(removePreferences()) }
+        uninstallPhase = uninstallSteps.allSatisfy { $0.ok } ? .done : .failed
+    }
+
+    private func unregisterLoginItem() -> UninstallStep {
+        let service = SMAppService.mainApp
+        guard service.status == .enabled || service.status == .requiresApproval else {
+            return UninstallStep(title: "关掉登录时启动", ok: true, detail: "本来就没打开")
+        }
+        do {
+            try service.unregister()
+            return UninstallStep(title: "关掉登录时启动", ok: true, detail: "已从登录项里移除")
+        } catch {
+            return UninstallStep(title: "关掉登录时启动", ok: false, detail: "\(error.localizedDescription)。可以到“系统设置 › 通用 › 登录项”里手动移除。")
+        }
+    }
+
+    /// 偏好设置和系统保存的窗口状态
+    private func removePreferences() -> UninstallStep {
+        guard let id = Bundle.main.bundleIdentifier else { return UninstallStep(title: "删除偏好设置", ok: true, detail: "没有应用标识") }
+        UserDefaults.standard.removePersistentDomain(forName: id)
+        let saved = RelayPaths.userHome() + "/Library/Saved Application State/\(id).savedState"
+        try? FileManager.default.removeItem(atPath: saved)
+        return UninstallStep(title: "删除偏好设置", ok: true, detail: id)
     }
 }

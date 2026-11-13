@@ -616,6 +616,7 @@ enum Headline {
         if model.runtime.startupError != nil { return ["AgentRelay 没有启动。"] }
         if model.paused { return ["传话已全部暂停，", "恢复前会话发的信都会被退回。"] }
         if model.groups.isEmpty { return ["先登记项目，", "会话才能互相传话。"] }
+        if model.needsSetup { return ["项目登记好了，", "还要在“接入”页给两边装上传话工具。"] }
         let first = model.todayCount == 0 ? "今天还没有传信，" : "今天传了 \(model.todayCount) 封信，"
         let second = model.attention.isEmpty ? "一切正常。" : "有 \(model.attention.count) 件事等你处理。"
         return [first, second]

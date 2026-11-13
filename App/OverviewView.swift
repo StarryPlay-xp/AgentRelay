@@ -13,6 +13,9 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 44) {
                 PageHeader(lines: Headline.lines(model)) {
+                    if model.needsSetup, !model.groups.isEmpty {
+                        Button("去接入") { go(.setup) }.buttonStyle(.inkFilled)
+                    }
                     Button(model.paused ? "恢复传话" : "全部暂停") { model.setPaused(!model.paused) }
                         .buttonStyle(.inkOutline)
                 }
