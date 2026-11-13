@@ -1,0 +1,3 @@
+#!/bin/sh
+# 检查提交说明，规则见 README.md 的“隐私约定”
+exec "$(git rev-parse --show-toplevel)/scripts/privacy-check.sh" --message "$1"

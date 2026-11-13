@@ -1,0 +1,3 @@
+#!/bin/sh
+# 提交前检查暂存的改动和文件名，规则见 README.md 的“隐私约定”
+exec "$(git rev-parse --show-toplevel)/scripts/privacy-check.sh" --staged

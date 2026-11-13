@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Xcode 个人数据与构建产物
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+DerivedData/
+build/
+.build/
+.swiftpm/
+
+# 签名与个人配置（团队编号、应用标识前缀只放在 Local.xcconfig）
+Config/Local.xcconfig
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.cer
+ExportOptions.plist
+
+# 本机私有词表（隐私检查用，不进仓库）
+.privacy-denylist
+
+# 设计方案只留在本机，不进仓库
+docs/设计方案.md
