@@ -10,9 +10,14 @@ struct AgentRelayApp: App {
         MenuBarExtra {
             MenuContent(model: delegate.model)
         } label: {
-            Image(systemName: delegate.model.paused ? "pause.circle" : "arrow.left.arrow.right.circle")
+            MenuBarLabel(model: delegate.model)
         }
         .menuBarExtraStyle(.window)
+
+        Window("AgentRelay", id: "main") {
+            MainWindow(model: delegate.model)
+        }
+        .defaultSize(width: 1000, height: 680)
     }
 }
 
@@ -32,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApplication.shared.terminate(nil)
             return
         }
+        AppLog.write(model.isRunning ? "启动，数据目录 \(model.runtime.paths.home)" : "启动失败：\(model.runtime.startupError ?? "")",
+                     paths: model.runtime.paths)
         Notifier.shared.setUp()
         // 被 kill 等信号结束时也正常收尾（关掉本机通话口）
         for sig in [SIGTERM, SIGINT] {
@@ -45,12 +52,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model.runtime.stop()
+        AppLog.write("退出", paths: model.runtime.paths)
+    }
+}
+
+/// 菜单栏图标。第一次使用（还没有分组）时，启动后自动打开主窗口，引导你登记项目
+struct MenuBarLabel: View {
+    @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: model.paused ? "pause.circle" : "arrow.left.arrow.right.circle")
+            .task(id: model.started) {
+                guard model.started, model.isRunning, model.groups.isEmpty, !model.openedAtLaunch else { return }
+                model.openedAtLaunch = true
+                openWindow(id: "main")
+                NSApplication.shared.activate()
+            }
     }
 }
 
 /// 菜单栏面板：运行或暂停状态、今天的信件数、待处理数、全部暂停、退出
 struct MenuContent: View {
     @Bindable var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -71,6 +96,11 @@ struct MenuContent: View {
                 Toggle("全部暂停", isOn: Binding(get: { model.paused }, set: { model.setPaused($0) }))
             }
             Divider()
+            Button("打开主窗口") {
+                openWindow(id: "main")
+                NSApplication.shared.activate()
+            }
+            .keyboardShortcut("o")
             Button("退出 AgentRelay") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q")
         }

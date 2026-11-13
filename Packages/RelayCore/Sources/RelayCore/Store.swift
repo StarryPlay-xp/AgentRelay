@@ -474,3 +474,6 @@ public final class Store: @unchecked Sendable {
                      [.text(key), .text(value)])
     }
 }
+
+extension SessionRow: Identifiable {}
+extension MessageRow: Identifiable {}

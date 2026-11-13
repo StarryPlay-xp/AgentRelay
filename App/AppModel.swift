@@ -19,6 +19,10 @@ final class AppModel {
     var waiting: Set<String> = []
     /// 最近一次操作的错误，界面上弹出
     var errorMessage: String?
+    /// 本次启动是否已经自动打开过主窗口
+    var openedAtLaunch = false
+    /// 中转核心启动流程已经走完（成功或失败），界面据此做启动后的事
+    var started = false
 
     @ObservationIgnored private var timer: Timer?
 
@@ -34,6 +38,7 @@ final class AppModel {
         runtime.onNotice = { [weak self] in self?.refresh() }
         runtime.start()
         refresh()
+        started = true
         let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -67,5 +72,29 @@ final class AppModel {
 
     func setPaused(_ on: Bool) {
         perform { try service?.setPaused(on) }
+    }
+
+    /// 某个项目当前所在的分组名
+    func groupName(ofProject name: String) -> String? {
+        projects.first { $0.name == name }?.groupName
+    }
+
+    /// 项目名在登记表里必须唯一：两边同名时加上平台，还重复就加序号
+    func uniqueProjectName(_ base: String, platform: Platform) -> String {
+        let taken = Set(projects.map(\.name))
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !taken.contains(trimmed) { return trimmed }
+        let withPlatform = "\(trimmed)（\(platform.displayName)）"
+        if !taken.contains(withPlatform) { return withPlatform }
+        var i = 2
+        while taken.contains("\(withPlatform) \(i)") { i += 1 }
+        return "\(withPlatform) \(i)"
+    }
+
+    /// 和会话看到的一样的信封
+    func envelope(for m: MessageRow) -> Envelope {
+        Envelope(messageID: m.id, chainID: m.chainID, hop: m.hop, hopLimit: store?.limits().hopLimit ?? Limits().hopLimit,
+                 fromMailbox: m.fromMailbox, fromPlatform: m.fromPlatform, fromProject: m.fromProject,
+                 needsReply: m.needsReply, subject: m.subject)
     }
 }
