@@ -13,5 +13,8 @@ CODE_SIGN_STYLE = Manual
 CODE_SIGN_IDENTITY = -
 DEVELOPMENT_TEAM =
 ENABLE_HARDENED_RUNTIME = YES
+// 正式构建不带调试权限 get-task-allow：Xcode 默认给“仅在本机运行”的签名也注入它，带着它别的程序就能挂上来读写进程内存。
+// 调试构建保留，Xcode 才能挂调试器。
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS[config=Release] = NO
 
 #include? "Local.xcconfig"
