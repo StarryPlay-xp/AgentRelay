@@ -53,6 +53,12 @@ private struct PlatformSetup: View {
             stateLine
             if let status {
                 details(status)
+                if takesOverRelease(status.state) {
+                    Text("现在的配置是正式版（默认数据目录）在用的。改成指向这个开发数据目录后，正式版就收不到会话的调用了；测试完要在正式版的“接入”页改回来。")
+                        .font(Fonts.small)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if wantsInstall(status.state), status.executable != nil, let i = model.runtime.integrations {
                     PreviewBox(preview: i.preview(platform, status: status))
                 }
@@ -70,6 +76,12 @@ private struct PlatformSetup: View {
                  ? "config.toml 装后没被改过时，用改前备份逐字还原；被改过时用官方命令移除。已经开着的会话里的传话服务会运行到会话关闭。"
                  : "用 Claude 的官方命令移除。已经开着的会话里的传话服务会运行到会话关闭。")
         }
+    }
+
+    /// 开发版要把正式版在用的配置改成指向开发数据目录
+    private func takesOverRelease(_ s: IntegrationState) -> Bool {
+        guard model.runtime.isDevelopmentHome, case .pointsElsewhere(let e) = s else { return false }
+        return e.home == nil
     }
 
     private func wantsInstall(_ s: IntegrationState) -> Bool {
