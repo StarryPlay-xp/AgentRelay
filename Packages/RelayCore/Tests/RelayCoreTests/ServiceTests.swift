@@ -179,6 +179,19 @@ struct ServiceTests {
         #expect(try h.service.store.message(id: reply.messageID!)?.queueRef == sampleID(99))
     }
 
+    @Test("发信后提醒发信方结束本轮，不要等回信（Codex 一轮不结束，排队的回信就不会执行）")
+    func afterSendAdvice() throws {
+        let h = try Harness()
+        h.registerAll()
+        let fromCodex = h.ok(h.codex(1), .send, WireArgs(to: "claude-1", body: "问题"))
+        #expect(fromCodex.text.contains("请现在就结束本轮回复"))
+        #expect(fromCodex.text.contains("不要等待回信"))
+        let fromClaude = h.ok(h.claude(11), .send, WireArgs(to: "codex-a", body: "问题"))
+        #expect(fromClaude.text.contains("等信命令会结束并叫醒你"))
+        let noReply = h.ok(h.codex(1), .send, WireArgs(to: "claude-1", body: "告知", needsReply: false))
+        #expect(noReply.text.contains("不需要对方回复，可以结束本轮回复"))
+    }
+
     @Test("PROJECT_NOT_REGISTERED：目录没登记；项目被停用后立即生效")
     func projectNotRegistered() throws {
         let h = try Harness()

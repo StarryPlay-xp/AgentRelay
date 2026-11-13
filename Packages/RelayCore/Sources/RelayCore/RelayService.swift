@@ -320,8 +320,23 @@ public final class RelayService: @unchecked Sendable {
                 throw RelayError(.deliveryFailed, "信没送出去：\(why)。已通知用户")
             }
         }
-        if needsReply { result.text += "需要对方回复；对方回信会按原会话送回。" }
+        result.text += Self.afterSendAdvice(sender: me.platform, needsReply: needsReply)
         return result
+    }
+
+    /// 发信后提醒发信方怎么等回信。Codex 只在一轮结束后才处理排队的消息，
+    /// 如果它在本轮里“等回信”，回信就会一直排在队列里（2026-11-13 实机测试发现）。
+    static func afterSendAdvice(sender: Platform, needsReply: Bool) -> String {
+        switch (sender, needsReply) {
+        case (.codex, true):
+            return "需要对方回复。回信会在本轮结束后作为一条新消息自动送进本会话，请现在就结束本轮回复：不要等待回信、不要轮询，也不要向用户要输入；本轮不结束，回信会一直排在队列里。"
+        case (.claude, true):
+            return "需要对方回复。回信到了，等信命令会结束并叫醒你；请确认等信命令正在后台运行，然后结束本轮回复，不要在本轮里等待。"
+        case (.codex, false):
+            return "不需要对方回复，可以结束本轮回复。"
+        case (.claude, false):
+            return "不需要对方回复。请确认等信命令正在后台运行，然后结束本轮回复。"
+        }
     }
 
     private func recordCodexOutcome(id: String, to: String, long: Bool, outcome: CodexQueueOutcome, final: Bool) {

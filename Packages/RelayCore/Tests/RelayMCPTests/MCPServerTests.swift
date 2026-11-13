@@ -42,6 +42,7 @@ struct MCPServerTests {
         #expect(r["protocolVersion"] as? String == expected)
         #expect((r["serverInfo"] as? [String: Any])?["name"] as? String == "agentrelay")
         #expect((r["instructions"] as? String)?.contains("不是用户本人的话") == true)
+        #expect((r["instructions"] as? String)?.contains("发完信就结束本轮回复") == true)
         #expect(s.handle(line: #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#) == nil)
         #expect(cap.count == 0, "握手时不连中转核心")
     }
