@@ -17,46 +17,32 @@ enum Page: String, CaseIterable, Identifiable {
         case .settings: return "设置"
         }
     }
-
-    var icon: String {
-        switch self {
-        case .overview: return "gauge.with.dots.needle.33percent"
-        case .projects: return "folder"
-        case .sessions: return "person.2"
-        case .messages: return "envelope"
-        case .settings: return "gearshape"
-        }
-    }
 }
 
+/// 主窗口：左边是自己画的侧边栏，右边是页面。窗口不显示标题栏，红绿灯直接叠在侧边栏上。
 struct MainWindow: View {
     @Bindable var model: AppModel
-    @State private var page: Page = .overview
+    @State private var page: Page
+    /// 消息页选中的信；概览里点一封信会跳过去
+    @State private var openMessage: String?
+
+    init(model: AppModel, page: Page = .overview, openMessage: String? = nil) {
+        self.model = model
+        _page = State(initialValue: page)
+        _openMessage = State(initialValue: openMessage)
+    }
 
     var body: some View {
-        NavigationSplitView {
-            List(Page.allCases, selection: $page) { p in
-                Label(p.title, systemImage: p.icon).tag(p)
-                    .badge(p == .overview ? model.attention.count : 0)
-            }
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180)
-        } detail: {
-            Group {
-                if let error = model.runtime.startupError {
-                    ContentUnavailableView("AgentRelay 没有启动", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else {
-                    switch page {
-                    case .overview: OverviewView(model: model)
-                    case .projects: ProjectsView(model: model)
-                    case .sessions: SessionsView(model: model)
-                    case .messages: MessagesView(model: model)
-                    case .settings: SettingsView(model: model)
-                    }
-                }
-            }
-            .navigationTitle(page.title)
+        HStack(spacing: 0) {
+            Sidebar(model: model, page: $page)
+            Hairline(vertical: true)
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 860, minHeight: 540)
+        .background(Palette.paper)
+        .tint(Palette.ink)
+        .ignoresSafeArea(.container, edges: .top)
+        .frame(minWidth: 900, minHeight: 580)
         .alert("操作没有完成", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("好") { model.errorMessage = nil }
         } message: {
@@ -73,21 +59,122 @@ struct MainWindow: View {
             AppLog.write("关闭主窗口", paths: model.runtime.paths)
         }
     }
-}
 
-// MARK: - 小部件
-
-struct PlatformBadge: View {
-    let platform: Platform
-
-    var body: some View {
-        Text(platform.displayName)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(platform == .codex ? Color.blue.opacity(0.15) : Color.orange.opacity(0.15), in: Capsule())
+    @ViewBuilder private var content: some View {
+        if let error = model.runtime.startupError {
+            EmptyState("AgentRelay 没有启动", symbol: "exclamationmark.triangle", message: error, tint: Palette.bad)
+        } else {
+            switch page {
+            case .overview:
+                OverviewView(model: model, go: { page = $0 }, open: { id in
+                    openMessage = id
+                    page = .messages
+                })
+            case .projects: ProjectsView(model: model)
+            case .sessions: SessionsView(model: model)
+            case .messages: MessagesView(model: model, selection: $openMessage)
+            case .settings: SettingsView(model: model)
+            }
+        }
     }
 }
+
+// MARK: - 侧边栏
+
+/// 侧边栏：字样和运行状态、五个页面（⌘1～⌘5）、底部的“全部暂停”
+private struct Sidebar: View {
+    @Bindable var model: AppModel
+    @Binding var page: Page
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("AgentRelay").font(Fonts.wordmark()).foregroundStyle(Palette.ink)
+                RunStateLabel(model: model)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 56)
+
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(Page.allCases.enumerated()), id: \.element) { index, p in
+                    SidebarItem(page: p, key: Character("\(index + 1)"), selected: page == p,
+                                badge: p == .overview ? model.attention.count : 0) { page = p }
+                }
+            }
+            .padding(.top, 36)
+
+            Spacer(minLength: 20)
+            footer
+        }
+        .frame(width: 196)
+        .frame(maxHeight: .infinity)
+    }
+
+    @ViewBuilder private var footer: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.runtime.startupError == nil {
+                HStack {
+                    Text("全部暂停").font(Fonts.small).foregroundStyle(Palette.ink2)
+                    Spacer()
+                    Toggle("全部暂停", isOn: Binding(get: { model.paused }, set: { on in model.setPaused(on) }))
+                        .inkSwitch()
+                }
+                .help("暂停后，会话发的信都会被退回；恢复后不补发")
+            }
+            if model.runtime.isDevelopmentHome {
+                Text("开发数据目录")
+                    .font(Fonts.tiny)
+                    .foregroundStyle(Palette.ink3)
+                    .help(model.runtime.paths.home)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 22)
+    }
+}
+
+private struct SidebarItem: View {
+    let page: Page
+    /// ⌘ 加这个键切到这一页
+    let key: Character
+    let selected: Bool
+    let badge: Int
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(page.title)
+                    .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected || hovering ? Palette.ink : Palette.ink2)
+                Spacer(minLength: 4)
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 11, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.warn)
+                        .accessibilityLabel("\(badge) 件待处理")
+                }
+            }
+            .padding(.horizontal, 24)
+            .frame(height: 34)
+            .contentShape(Rectangle())
+            .background(alignment: .leading) {
+                if selected {
+                    Capsule().fill(Palette.ink).frame(width: 2, height: 16).padding(.leading, 12)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(KeyEquivalent(key), modifiers: .command)
+        .help("\(page.title)（⌘\(String(key))）")
+        .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// MARK: - 格式
 
 enum Format {
     static func time(_ d: Date?) -> String {
@@ -130,6 +217,12 @@ enum Format {
         case .env: return "Claude 环境变量"
         case .selfReported: return "会话自报"
         }
+    }
+
+    /// 信的一句话预览：有主题用主题，没有就用正文第一行
+    static func preview(_ m: MessageRow) -> String {
+        if let s = m.subject, !s.isEmpty { return s }
+        return m.body.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
     }
 }
 

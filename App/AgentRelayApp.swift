@@ -17,7 +17,8 @@ struct AgentRelayApp: App {
         Window("AgentRelay", id: "main") {
             MainWindow(model: delegate.model)
         }
-        .defaultSize(width: 1000, height: 680)
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1040, height: 700)
     }
 }
 
@@ -56,13 +57,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-/// 菜单栏图标。第一次使用（还没有分组）时，启动后自动打开主窗口，引导你登记项目
+/// 菜单栏图标：信封带分叉箭头；有待处理时换成带圆点的信封，暂停时是暂停符号。
+/// 第一次使用（还没有分组）时，启动后自动打开主窗口，引导你登记项目
 struct MenuBarLabel: View {
     @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(systemName: model.paused ? "pause.circle" : "arrow.left.arrow.right.circle")
+        Image(systemName: symbol)
+            .accessibilityLabel("AgentRelay")
             .task(id: model.started) {
                 guard model.started, model.isRunning, model.groups.isEmpty, !model.openedAtLaunch else { return }
                 model.openedAtLaunch = true
@@ -70,41 +73,137 @@ struct MenuBarLabel: View {
                 NSApplication.shared.activate()
             }
     }
+
+    private var symbol: String {
+        if model.runtime.startupError != nil { return "exclamationmark.triangle" }
+        if model.paused { return "pause.circle" }
+        return model.attention.isEmpty ? "envelope.arrow.triangle.branch" : "envelope.badge"
+    }
 }
 
-/// 菜单栏面板：运行或暂停状态、今天的信件数、待处理数、全部暂停、退出
+/// 菜单栏面板：顶边是航空信条纹；一句话说清今天的信件数和待处理数，列出最近几件待处理，下面是全部暂停、打开主窗口、退出
 struct MenuContent: View {
     @Bindable var model: AppModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let error = model.runtime.startupError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-            } else {
-                Label(model.paused ? "已暂停全部传话" : "正在运行", systemImage: model.paused ? "pause.circle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(model.paused ? .orange : .green)
-                Text("今天 \(model.todayCount) 封信 · 待处理 \(model.attention.count) 项")
-                    .foregroundStyle(.secondary)
-                if let problem = model.runtime.helperProblem {
-                    Text(problem).font(.caption).foregroundStyle(.orange)
+        VStack(alignment: .leading, spacing: 0) {
+            AirmailStripe(height: 4)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("AgentRelay").font(Fonts.wordmark(15)).foregroundStyle(Palette.ink)
+                    Spacer()
+                    RunStateLabel(model: model)
                 }
-                if model.runtime.isDevelopmentHome {
-                    Text("开发数据目录：\(model.runtime.paths.home)").font(.caption).foregroundStyle(.secondary)
+                if let error = model.runtime.startupError {
+                    Text(error)
+                        .font(Fonts.small)
+                        .foregroundStyle(Palette.bad)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 14)
+                } else {
+                    status
                 }
-                Toggle("全部暂停", isOn: Binding(get: { model.paused }, set: { model.setPaused($0) }))
             }
-            Divider()
-            Button("打开主窗口") {
-                openWindow(id: "main")
-                NSApplication.shared.activate()
+            .padding(.horizontal, 18)
+            .padding(.top, 16)
+            .padding(.bottom, 16)
+            Hairline()
+            VStack(spacing: 0) {
+                if model.runtime.startupError == nil {
+                    HStack {
+                        Text("全部暂停").font(Fonts.body).foregroundStyle(Palette.ink)
+                        Spacer()
+                        Toggle("全部暂停", isOn: Binding(get: { model.paused }, set: { on in model.setPaused(on) }))
+                            .inkSwitch()
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                }
+                MenuRow(title: "打开主窗口", key: "o", action: openMain)
+                MenuRow(title: "退出 AgentRelay", key: "q") { NSApplication.shared.terminate(nil) }
             }
-            .keyboardShortcut("o")
-            Button("退出 AgentRelay") { NSApplication.shared.terminate(nil) }
-                .keyboardShortcut("q")
+            .padding(6)
         }
-        .padding(14)
         .frame(width: 300)
+        .background(Palette.paper)
+        .tint(Palette.ink)
+    }
+
+    @ViewBuilder private var status: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Headline.lines(model), id: \.self) { Text($0) }
+        }
+        .font(Fonts.display(18))
+        .foregroundStyle(Palette.ink)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 18)
+        if !model.attention.isEmpty {
+            Button(action: openMain) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.attention.prefix(3)) { item in
+                        HStack(spacing: 10) {
+                            Capsule().fill(Headline.color(item)).frame(width: 2, height: 13)
+                            Text(item.title).font(Fonts.small).foregroundStyle(Palette.ink).lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(Format.time(item.time)).font(Fonts.tiny).monospacedDigit().foregroundStyle(Palette.ink3)
+                        }
+                    }
+                    if model.attention.count > 3 {
+                        Text("还有 \(model.attention.count - 3) 件，在主窗口里处理").font(Fonts.tiny).foregroundStyle(Palette.ink3)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("在主窗口里处理")
+            .padding(.top, 14)
+        }
+        if let problem = model.runtime.helperProblem {
+            Text(problem)
+                .font(Fonts.tiny)
+                .foregroundStyle(Palette.warn)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 12)
+        }
+        if model.runtime.isDevelopmentHome {
+            Text("开发数据目录：\(model.runtime.paths.home)")
+                .font(Fonts.tiny)
+                .foregroundStyle(Palette.ink3)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.top, 12)
+        }
+    }
+
+    private func openMain() {
+        openWindow(id: "main")
+        NSApplication.shared.activate()
+    }
+}
+
+/// 面板里的一行操作：悬停时铺淡底，右边是快捷键
+private struct MenuRow: View {
+    let title: String
+    /// ⌘ 加这个键
+    let key: Character
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(title).font(Fonts.body).foregroundStyle(Palette.ink)
+                Spacer()
+                Text("⌘" + String(key).uppercased()).font(Fonts.small).foregroundStyle(Palette.ink3)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 32)
+            .contentShape(Rectangle())
+            .background(hovering ? Palette.wash : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(KeyEquivalent(key), modifiers: .command)
+        .onHover { hovering = $0 }
     }
 }

@@ -1,21 +1,71 @@
+import AppKit
 import RelayCore
 import ServiceManagement
 import SwiftUI
 
 /// 设置：各项上限、保留期、codex 程序路径、通知、登录时启动（设计方案第 16 节；完全卸载在第 4 步）。
-/// 每一节拆成独立视图：整页写在一个表单里时，Swift 编译器会因类型过大而崩溃。
+/// 每一节左边写这一节管什么，右边是控件。每一节拆成独立视图：整页写在一个视图里时，Swift 编译器会因类型过大而崩溃。
 struct SettingsView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        Form {
-            LimitsSection(model: model)
-            CodexSection(model: model)
-            NotificationSection()
-            LoginSection(model: model)
-            DataSection(paths: model.runtime.paths)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                PageHeader("设置").padding(.bottom, 20)
+                LimitsSection(model: model)
+                Hairline()
+                CodexSection(model: model)
+                Hairline()
+                NotificationSection()
+                Hairline()
+                LoginSection(model: model)
+                Hairline()
+                DataSection(paths: model.runtime.paths)
+            }
+            .pagePadding()
         }
-        .formStyle(.grouped)
+    }
+}
+
+/// 一节设置：左栏标题和说明，右栏控件
+private struct SettingsBlock<Content: View>: View {
+    let title: String
+    let note: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 40) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.ink)
+                Text(note)
+                    .font(Fonts.small)
+                    .foregroundStyle(Palette.ink2)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 190, alignment: .leading)
+            VStack(alignment: .leading, spacing: 14) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 28)
+    }
+}
+
+/// 一行开关：左边文字，右边开关
+private struct SwitchRow: View {
+    let title: String
+    var note: String?
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(Fonts.body).foregroundStyle(Palette.ink)
+                if let note { Text(note).font(Fonts.small).foregroundStyle(Palette.ink2) }
+            }
+            Spacer(minLength: 12)
+            Toggle(title, isOn: $isOn).inkSwitch()
+        }
     }
 }
 
@@ -26,18 +76,27 @@ private struct LimitsSection: View {
     @State private var saved = false
 
     var body: some View {
-        Section("护栏上限") {
-            Stepper("同一来回链最多往返 \(limits.hopLimit) 次", value: $limits.hopLimit, in: 1...50)
-            Stepper("每两个信箱之间每小时最多 \(limits.pairPerHour) 封", value: $limits.pairPerHour, in: 1...1_000)
-            Stepper("全部合计每小时最多 \(limits.totalPerHour) 封", value: $limits.totalPerHour, in: 1...10_000)
-            Stepper("单封正文最多 \(limits.maxBodyCharacters) 字", value: $limits.maxBodyCharacters, in: 1_000...200_000, step: 1_000)
-            Stepper("给 Codex 超过 \(limits.codexInlineMaxCharacters) 字改为长信通知", value: $limits.codexInlineMaxCharacters, in: 1_000...100_000, step: 1_000)
-            Stepper("信件和记录保留 \(limits.retentionDays) 天", value: $limits.retentionDays, in: 1...365)
-            HStack {
-                Button("保存", action: save)
-                Button("恢复默认值") { limits = Limits() }
-                if saved { Text("已保存，立即生效").foregroundStyle(.green) }
+        SettingsBlock(title: "护栏上限", note: "防止两边无限来回、刷屏。改完点“保存”，立即生效。") {
+            LimitRow(label: "同一来回链最多往返", unit: "次", value: $limits.hopLimit, range: 1...50)
+            LimitRow(label: "每两个信箱之间每小时最多", unit: "封", value: $limits.pairPerHour, range: 1...1_000)
+            LimitRow(label: "全部合计每小时最多", unit: "封", value: $limits.totalPerHour, range: 1...10_000)
+            LimitRow(label: "单封正文最多", unit: "字", value: $limits.maxBodyCharacters, range: 1_000...200_000, step: 1_000)
+            LimitRow(label: "给 Codex 的信超过这个长度改为长信通知", unit: "字", value: $limits.codexInlineMaxCharacters,
+                     range: 1_000...100_000, step: 1_000)
+            LimitRow(label: "信件和记录保留", unit: "天", value: $limits.retentionDays, range: 1...365)
+            HStack(spacing: 12) {
+                Button("保存", action: save).buttonStyle(.inkFilled).disabled(saved)
+                Button("恢复默认值") { limits = Limits() }.buttonStyle(.inkText)
+                if saved {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+                        Text("已保存，立即生效")
+                    }
+                    .font(Fonts.small)
+                    .foregroundStyle(Palette.ok)
+                }
             }
+            .padding(.top, 6)
         }
         .onAppear {
             guard !loaded, let store = model.store else { return }
@@ -53,21 +112,48 @@ private struct LimitsSection: View {
     }
 }
 
+private struct LimitRow: View {
+    let label: String
+    let unit: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    var step = 1
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(label).font(Fonts.body).foregroundStyle(Palette.ink)
+            Spacer(minLength: 12)
+            ValueStepper(value: $value, range: range, step: step)
+            Text(unit).font(Fonts.small).foregroundStyle(Palette.ink2).frame(width: 16, alignment: .leading)
+        }
+    }
+}
+
 private struct CodexSection: View {
     @Bindable var model: AppModel
     @State private var path = ""
     @State private var loaded = false
 
     var body: some View {
-        Section("codex 程序") {
-            HStack {
-                TextField("留空则自动查找", text: $path)
-                Button("选择…", action: choose)
+        SettingsBlock(title: "codex 程序", note: "给 Codex 会话送信要用到它。一般不用填，AgentRelay 会自己找。") {
+            HStack(spacing: 8) {
+                TextField("留空则自动查找", text: $path).inkField()
+                Button("选择…", action: choose).buttonStyle(.inkOutline)
                 Button("保存") { model.perform { try model.store?.setCodexPath(path.isEmpty ? nil : path) } }
+                    .buttonStyle(.inkFilled)
             }
-            LabeledContent("现在会用", value: CodexCLI.locate(configuredPath: path.isEmpty ? nil : path) ?? "找不到 codex 程序")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("现在会用").font(Fonts.small).foregroundStyle(Palette.ink3)
+                if let found = CodexCLI.locate(configuredPath: path.isEmpty ? nil : path) {
+                    Text(found).font(Fonts.mono(12, weight: .regular)).foregroundStyle(Palette.ink).textSelection(.enabled)
+                } else {
+                    Text("找不到 codex 程序").font(Fonts.small.weight(.medium)).foregroundStyle(Palette.bad)
+                }
+            }
             Text("优先用正在运行的 ChatGPT 里的那份；找不到再用这里填的，最后用 ChatGPT 默认位置和命令行里的 codex。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Fonts.small)
+                .foregroundStyle(Palette.ink2)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .onAppear {
             guard !loaded else { return }
@@ -88,9 +174,10 @@ private struct NotificationSection: View {
     @AppStorage(Notifier.enabledKey) private var enabled = true
 
     var body: some View {
-        Section("通知") {
-            Toggle("有事时发系统通知（投递失败、被拦截、交接、可能卡住等）", isOn: $enabled)
+        SettingsBlock(title: "通知", note: "不看会话内容，也能知道哪里出了问题。") {
+            SwitchRow(title: "有事时发系统通知", note: "投递失败、被拦截、交接、可能卡住等", isOn: $enabled)
             Button("发一条测试通知") { Notifier.shared.post(Notice(kind: "测试", text: "通知正常。")) }
+                .buttonStyle(.inkOutline)
         }
     }
 }
@@ -100,10 +187,10 @@ private struct LoginSection: View {
     @State private var enabled = SMAppService.mainApp.status == .enabled
 
     var body: some View {
-        Section("启动") {
-            Toggle("登录时自动启动 AgentRelay", isOn: Binding(get: { enabled }, set: { on in set(on) }))
+        SettingsBlock(title: "启动", note: "AgentRelay 不在运行时，会话之间没法传话。") {
+            SwitchRow(title: "登录时自动启动 AgentRelay", isOn: Binding(get: { enabled }, set: { on in set(on) }))
             if SMAppService.mainApp.status == .requiresApproval {
-                Text("需要在“系统设置 › 通用 › 登录项”里允许 AgentRelay。").font(.caption).foregroundStyle(.orange)
+                Text("需要在“系统设置 › 通用 › 登录项”里允许 AgentRelay。").font(Fonts.small).foregroundStyle(Palette.warn)
             }
         }
     }
@@ -120,11 +207,24 @@ private struct DataSection: View {
     let paths: RelayPaths
 
     var body: some View {
-        Section("数据位置") {
-            LabeledContent("运行文件", value: paths.home)
-            LabeledContent("数据库", value: paths.database)
-            LabeledContent("日志", value: paths.logs)
-            Text("“完全卸载”会在配置向导里提供（开发计划第 4 步）。").font(.caption).foregroundStyle(.secondary)
+        SettingsBlock(title: "数据位置", note: "信件、登记表和日志都只存在这台电脑上。") {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 8) {
+                row("运行文件", paths.home)
+                row("数据库", paths.database)
+                row("日志", paths.logs)
+            }
+            Button("在访达中显示") {
+                NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: paths.home)])
+            }
+            .buttonStyle(.inkOutline)
+            Text("“完全卸载”会在配置向导里提供（开发计划第 4 步）。").font(Fonts.small).foregroundStyle(Palette.ink3)
+        }
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label).font(Fonts.small).foregroundStyle(Palette.ink3)
+            Text(value).font(Fonts.mono(12, weight: .regular)).foregroundStyle(Palette.ink).textSelection(.enabled)
         }
     }
 }
