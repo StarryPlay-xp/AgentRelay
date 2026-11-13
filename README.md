@@ -17,6 +17,8 @@ AgentRelay 是独立的开源项目，不是 Anthropic 或 OpenAI 的官方产�
 
 - 会话之间自动来回会增加两边的用量。
 - 请按你自己的账号类型，确认相关服务条款允许这种用法。
+- 装好传话工具后，要**新开会话**才能用；已经开着的会话看不到新工具。
+- Codex 会话正在执行时，如果你按了停止，或者退出、重启了 ChatGPT，这个会话的传话队列会暂停，后面送来的信都排着不执行，要到那个会话里点“继续”。
 
 ## 参与开发
 
@@ -40,6 +42,54 @@ scripts/privacy-check.sh --history
 ```bash
 scripts/test-privacy-check.sh
 ```
+
+### 构建和测试
+
+非界面部分在 Swift 包 `Packages/RelayCore` 里，不依赖任何第三方包（数据库用系统自带的 SQLite，MCP 协议手写），需要 Xcode 16 以上（Swift 6）。
+
+```bash
+cd Packages/RelayCore
+swift build
+swift test
+```
+
+- 先 `swift build` 再 `swift test`：集成测试会起真实的 `relayd`、`relay-mcp`、`relay-wait` 进程，全部在临时目录里跑，codex 用假脚本，不会碰到你真实的 Codex、Claude 会话。
+- 测试只用合成数据，会话编号用固定示例 `00000000-0000-4000-8000-0000000000NN`。
+
+### 开发用中转进程 relayd
+
+桌面应用做好之前，用 `relayd` 代替中转核心。建议用独立的数据目录，和以后正式用的 `~/.agentrelay` 分开：
+
+```bash
+.build/debug/relayd --home ~/.agentrelay-dev
+```
+
+- 登记表放在 `<数据目录>/data/registry.json`，格式如下（目录写绝对路径或以 `~/` 开头）：
+
+```json
+{
+  "groups": ["示例组"],
+  "projects": [
+    {"name": "项目甲", "platform": "codex", "group": "示例组", "paths": ["~/示例项目"]},
+    {"name": "项目甲-Claude", "platform": "claude", "group": "示例组", "paths": ["~/示例项目"]}
+  ]
+}
+```
+
+- `<数据目录>/bin/` 下放两个符号链接 `relay-mcp`、`relay-wait`，指向构建产物。
+- 接入 Codex（全局）和 Claude（只对某个项目目录，在该目录里执行；名字要写在 `-e` 前面）：
+
+```bash
+codex mcp add agent-relay --env AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
+```
+
+```bash
+claude mcp add --scope local agent-relay -e AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
+```
+
+- 控制台命令：`status`、`sessions`、`messages`、`events`、`pause`、`resume`、`handoff <信箱名>`（确认交接）、`reload`、`quit`。
+- 默认按正式模式核对对端：relay-mcp 必须由带厂商签名的 Codex 或 Claude Code 拉起。`--dev-relax-peer-check` 只供测试；`--codex <路径>` 固定使用某个 codex 程序。
+- 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope local agent-relay` 卸载。
 
 ## 隐私约定
 
