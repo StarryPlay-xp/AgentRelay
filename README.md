@@ -17,6 +17,9 @@ AgentRelay 是独立的开源项目，不是 Anthropic 或 OpenAI 的官方产�
 
 - 会话之间自动来回会增加两边的用量。
 - 请按你自己的账号类型，确认相关服务条款允许这种用法。
+- 在应用的“接入”页一键给 Codex、Claude 装上传话工具。它只用两边自己的官方命令（`codex mcp add`、`claude mcp add --scope user`），会改 `~/.codex/config.toml` 和 `~/.claude.json`；改之前先把这两个文件备份到本机的数据目录（只有你能读），每次改动都有记录。
+- 两边都装在全局：所有 Codex、Claude 会话（包括开在 Git 工作副本里的）都能看到这个工具，但只有你登记过的项目里的会话调用才会成功；代价是每个会话都多一份工具说明。
+- 撤回：在“接入”页点“卸载”；Codex 的配置装后没被别的程序改过时，会用备份逐字还原。要连应用一起卸掉，用“设置 › 完全卸载…”，它会先从两边移除，再删程序链接和运行文件，并问你要不要连数据库、备份和日志一起删。
 - 装好传话工具后，要**新开会话**才能用；已经开着的会话看不到新工具。
 - Codex 会话正在执行时，如果你按了停止，或者退出、重启了 ChatGPT，这个会话的传话队列会暂停，后面送来的信都排着不执行，要到那个会话里点“继续”。
 
@@ -55,6 +58,11 @@ swift test
 
 - 先 `swift build` 再 `swift test`：集成测试会起真实的 `relayd`、`relay-mcp`、`relay-wait` 进程，全部在临时目录里跑，codex 用假脚本，不会碰到你真实的 Codex、Claude 会话。
 - 测试只用合成数据，会话编号用固定示例 `00000000-0000-4000-8000-0000000000NN`。
+- 接入向导的默认测试用模拟两边行为的假命令。要用真的 codex、claude 走一遍接入、核对、卸载，手动开启下面这项（需要装有 ChatGPT 桌面版和命令行 `claude`）。它把 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 指向临时目录，跑完核对你真实的配置没被改动：
+
+```bash
+AGENTRELAY_REAL_CLI_TEST=1 swift test --filter SetupTests
+```
 
 ### 构建和运行桌面应用
 
@@ -77,21 +85,21 @@ build/DerivedData/Build/Products/Debug/AgentRelay.app/Contents/MacOS/AgentRelay 
 - 同一个数据目录只能有一份 AgentRelay 在运行，再打开一份会提示“已经在运行”并退出。
 - **签名**：没有 `Config/Local.xcconfig` 时，应用标识是 `local.dev.AgentRelay`，按“仅在本机运行”签名，克隆下来就能构建。要用自己的开发者团队签名，把 `Config/Local.xcconfig.example` 复制成 `Config/Local.xcconfig` 再填写；这个文件不进仓库。
 - 界面文字目前只有中文，集中在 `App/Localizable.xcstrings`；Xcode 构建时会把新增的文字收进这个文件，改界面时随改动一起提交。
-- 一键接入 Codex、Claude 的配置向导还没做（开发计划第 4 步），开发时按下一节手动接入。
+- 接入 Codex、Claude：在应用的“接入”页一键完成。数据目录不是默认位置时（例如开发数据目录），会把 `AGENTRELAY_HOME` 一并写进两边的配置。也可以按下一节手动接入。
 
 ### 开发时手动接入 Codex 和 Claude
 
-把 `<数据目录>` 换成应用或 relayd 用的数据目录（例如 `~/.agentrelay-dev`）。接入 Codex（全局）和 Claude（只对某个项目目录，在该目录里执行；名字要写在 `-e` 前面）：
+一般用应用的“接入”页就行；用 relayd 或想手动操作时，把 `<数据目录>` 换成用的数据目录（例如 `~/.agentrelay-dev`）。两边都装在全局；Claude 那条的名字要写在 `-e` 前面：
 
 ```bash
 codex mcp add agent-relay --env AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
 ```
 
 ```bash
-claude mcp add --scope local agent-relay -e AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
+claude mcp add --scope user agent-relay -e AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
 ```
 
-- 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope local agent-relay` 卸载。
+- 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope user agent-relay` 卸载。
 - 装好后要新开会话才能用。Claude 会话登记后，按返回结果在后台运行等信命令。
 
 ### 开发用中转进程 relayd
