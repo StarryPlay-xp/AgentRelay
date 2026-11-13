@@ -96,7 +96,7 @@ let codex = CodexCLI(executable: {
 let service = RelayService(
     paths: paths, store: store, registry: registry,
     resolver: IdentityResolver(locator: SessionRecordLocator(paths: ExternalPaths.resolve(environment: env))),
-    dispatcher: CodexDispatcher(queuer: codex), notify: notify)
+    dispatcher: CodexDispatcher(queuer: codex), handoffHint: { "确认请在 relayd 控制台输入：handoff \($0)" }, notify: notify)
 
 let policy: PeerPolicy = relaxed ? .relaxed : .strict(relayMCP: paths.bin + "/relay-mcp")
 let server = SocketServer(paths: paths, policy: policy, onReject: { notify(Notice(kind: "拒绝", text: $0)) }) { req, platform in

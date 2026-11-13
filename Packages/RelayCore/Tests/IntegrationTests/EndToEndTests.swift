@@ -196,10 +196,13 @@ struct EndToEndTests {
         let c = try w.tool("relay_register", ["mailbox": "claude-1"], claude: 11)
         #expect(!c.isError, "\(c.text)")
         #expect(c.text.contains("codex-a（Codex · 项目甲）"))
-        #expect(c.text.contains("relay-wait\" --mailbox claude-1 --home"))
+        #expect(c.text.contains("relay-wait\" --mailbox claude-1 --owner "))
+        // 等信命令里带着本会话的主人短码
+        let owner11 = try #require(c.text.range(of: #"--owner [0-9a-f]{12}"#, options: .regularExpression)
+            .map { String(c.text[$0].dropFirst("--owner ".count)) })
 
         // Claude 挂上等信
-        let wait = try Running(try binary("relay-wait"), ["--mailbox", "claude-1", "--home", w.home], env: w.baseEnv)
+        let wait = try Running(try binary("relay-wait"), ["--mailbox", "claude-1", "--owner", owner11, "--home", w.home], env: w.baseEnv)
         defer { wait.stop() }
         usleep(300_000)
         #expect(wait.process.isRunning, "没有信时应当一直等")
@@ -243,12 +246,19 @@ struct EndToEndTests {
         d.send("resume")
         #expect(d.output.waitFor("已恢复传话"))
 
-        // 交接：另一个 Claude 会话想用 claude-1，要在控制台确认
+        // 交接：另一个 Claude 会话想用 claude-1，要在控制台确认；旧会话还在跑的等信命令随之自己结束
+        let oldWait = try Running(try binary("relay-wait"), ["--mailbox", "claude-1", "--owner", owner11, "--home", w.home], env: w.baseEnv)
+        defer { oldWait.stop() }
         let taken = try w.tool("relay_register", ["mailbox": "claude-1"], claude: 12)
         #expect(taken.text.hasPrefix("错误 MAILBOX_TAKEN"))
         #expect(d.output.waitFor("handoff claude-1"))
+        usleep(300_000)
+        #expect(oldWait.process.isRunning, "交接确认前旧会话照常等信")
         d.send("handoff claude-1")
         #expect(d.output.waitFor("改由新会话接手"))
+        #expect(oldWait.waitExit(timeout: 5), "交接确认后旧会话的等信应当自己结束")
+        #expect(oldWait.process.terminationStatus == 3)
+        #expect(oldWait.output.all.contains("已经不归本会话"))
         #expect(!(try w.tool("relay_status", [:], claude: 12).isError))
         #expect(try w.tool("relay_status", [:], claude: 11).text.hasPrefix("错误 SESSION_NOT_REGISTERED"))
 

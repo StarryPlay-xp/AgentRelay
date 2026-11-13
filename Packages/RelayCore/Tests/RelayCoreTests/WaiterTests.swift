@@ -33,6 +33,9 @@ struct WaiterTests {
     func parse() {
         #expect(RelayWaitCommand.parse(["--mailbox", "claude-1"]) == .init(mailbox: "claude-1", home: nil))
         #expect(RelayWaitCommand.parse(["--mailbox", "claude-1", "--home", "/tmp/h"]) == .init(mailbox: "claude-1", home: "/tmp/h"))
+        #expect(RelayWaitCommand.parse(["--mailbox", "claude-1", "--owner", "0a1b2c3d4e5f", "--home", "/tmp/h"])
+                == .init(mailbox: "claude-1", owner: "0a1b2c3d4e5f", home: "/tmp/h"))
+        #expect(RelayWaitCommand.parse(["--mailbox", "claude-1", "--owner"]) == nil)
         #expect(RelayWaitCommand.parse([]) == nil)
         #expect(RelayWaitCommand.parse(["--mailbox"]) == nil)
         #expect(RelayWaitCommand.parse(["--mailbox", "a", "--其他"]) == nil)

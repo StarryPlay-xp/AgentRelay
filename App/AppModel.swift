@@ -15,7 +15,7 @@ final class AppModel {
     var projects: [ProjectRow] = []
     var sessions: [SessionRow] = []
     var messages: [MessageRow] = []
-    /// 现在有 relay-wait 在等的信箱
+    /// 当前主人正在用 relay-wait 等信的信箱（旧会话残留的等信不算）
     var waiting: Set<String> = []
     /// 最近一次操作的错误，界面上弹出
     var errorMessage: String?
@@ -55,7 +55,7 @@ final class AppModel {
         projects = (try? store.projects()) ?? []
         sessions = (try? store.sessions()) ?? []
         messages = (try? store.recentMessages(limit: 500)) ?? []
-        waiting = ProcessWaitDetector.waitingMailboxes()
+        waiting = ProcessWaitDetector.waitingMailboxes(for: sessions.filter { $0.platform == .claude && $0.status == .active })
     }
 
     /// 执行一个修改操作；出错时把原因显示给你

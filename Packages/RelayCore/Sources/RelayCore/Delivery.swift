@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -181,33 +182,81 @@ public struct ClaudeMailbox: Sendable {
         guard let s = try? String(contentsOfFile: paths.mailboxMarker(mailbox), encoding: .utf8) else { return nil }
         return Int(s.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+
+    /// 信箱主人标记里的短码；没有标记文件时为 nil，没有主人时为 `MailboxOwner.none`
+    public func owner(mailbox: String) -> String? {
+        guard let s = try? String(contentsOfFile: paths.mailboxOwner(mailbox), encoding: .utf8) else { return nil }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 写信箱主人标记；`token` 为 nil 表示这个信箱现在没有 Claude 会话在用。
+    /// 没有主人、信箱目录也不存在时什么都不写；内容没变时不重写。
+    public func setOwner(_ token: String?, mailbox: String) throws {
+        let value = token ?? MailboxOwner.none
+        if token == nil, !FileManager.default.fileExists(atPath: paths.mailbox(mailbox)) { return }
+        if owner(mailbox: mailbox) == value { return }
+        try FileSystem.makeDirectory(paths.mailbox(mailbox), mode: 0o700)
+        try FileSystem.writeAtomically(Data(value.utf8), to: paths.mailboxOwner(mailbox))
+    }
+
+    /// 现有的信箱目录名（只返回合规的信箱名）
+    public func mailboxNames() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.mailboxes)) ?? []
+        return names.filter { (try? MailboxName.validate($0)) != nil }
+    }
+}
+
+/// 信箱主人的短码：由会话编号算出，不在命令里露出编号原文。
+/// 交接、改名、停用后信箱换了主人（或没了主人），带旧短码的等信命令会自己结束。
+public enum MailboxOwner {
+    /// 信箱现在没有 Claude 会话在用
+    public static let none = "-"
+
+    public static func token(sessionID: String) -> String {
+        SHA256.hash(data: Data(sessionID.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func token(for session: SessionRow) -> String { token(sessionID: session.sessionID) }
 }
 
 public protocol WaitDetecting: Sendable {
-    /// 这个信箱现在有没有 relay-wait 在等
-    func isWaiting(mailbox: String) -> Bool
+    /// 这个信箱现在有没有当前主人的 relay-wait 在等（`owner` 是主人的短码）
+    func isWaiting(mailbox: String, owner: String) -> Bool
 }
 
-/// 看本用户进程里有没有 `relay-wait --mailbox <信箱名>`。
+/// 看本用户进程里有没有 `relay-wait --mailbox <信箱名> [--owner <短码>]`。
 /// 不要求 relay-wait 写心跳文件，避开 Claude 沙盒可能不让写文件的问题。
+/// 带短码的只算短码相符的；不带短码的（旧版等信命令）分不清是谁在等，照旧算在等。
 public struct ProcessWaitDetector: WaitDetecting {
     public init() {}
 
-    /// 现在有 relay-wait 在等的所有信箱（界面刷新时一次扫完，不必逐个信箱扫）
-    public static func waitingMailboxes() -> Set<String> {
-        var out = Set<String>()
-        for pid in Processes.find({ _, path, _ in (path as NSString).lastPathComponent == "relay-wait" }) {
-            guard let args = Processes.arguments(of: pid), let i = args.firstIndex(of: "--mailbox"), i + 1 < args.count else { continue }
-            out.insert(args[i + 1])
-        }
-        return out
+    /// 从 relay-wait 的参数里取出信箱名和短码；不是合法的等信参数时返回 nil
+    public static func waiter(arguments args: [String]) -> (mailbox: String, owner: String?)? {
+        guard let i = args.firstIndex(of: "--mailbox"), i + 1 < args.count else { return nil }
+        var owner: String?
+        if let j = args.firstIndex(of: "--owner"), j + 1 < args.count { owner = args[j + 1] }
+        return (args[i + 1], owner)
     }
 
-    public func isWaiting(mailbox: String) -> Bool {
-        !Processes.find { _, path, args in
-            guard (path as NSString).lastPathComponent == "relay-wait",
-                  let i = args.firstIndex(of: "--mailbox"), i + 1 < args.count else { return false }
-            return args[i + 1] == mailbox
-        }.isEmpty
+    private static func waiters() -> [(mailbox: String, owner: String?)] {
+        Processes.find({ _, path, _ in (path as NSString).lastPathComponent == "relay-wait" }).compactMap {
+            Processes.arguments(of: $0).flatMap(waiter(arguments:))
+        }
+    }
+
+    static func matches(_ w: (mailbox: String, owner: String?), mailbox: String, owner: String) -> Bool {
+        w.mailbox == mailbox && (w.owner == nil || w.owner == owner)
+    }
+
+    /// 这些会话里，当前有自己的 relay-wait 在等的信箱名（界面刷新时一次扫完，不必逐个信箱扫）
+    public static func waitingMailboxes(for sessions: [SessionRow]) -> Set<String> {
+        let all = waiters()
+        return Set(sessions.filter { s in
+            all.contains { matches($0, mailbox: s.mailbox, owner: MailboxOwner.token(for: s)) }
+        }.map(\.mailbox))
+    }
+
+    public func isWaiting(mailbox: String, owner: String) -> Bool {
+        Self.waiters().contains { Self.matches($0, mailbox: mailbox, owner: owner) }
     }
 }

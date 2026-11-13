@@ -24,6 +24,8 @@ public final class RelayService: @unchecked Sendable {
     private let appServerPID: @Sendable () -> pid_t?
     let clock: @Sendable () -> Date
     private let notify: @Sendable (Notice) -> Void
+    /// 有新会话想接手信箱时，告诉用户去哪里确认（应用里是概览页，开发用的 relayd 是控制台命令）
+    private let handoffHint: @Sendable (String) -> String
 
     let lock = NSLock()
     private var notifiedUnread: [Int: String] = [:]
@@ -36,6 +38,7 @@ public final class RelayService: @unchecked Sendable {
                 limits: @escaping @Sendable () -> Limits = { Limits() }, dispatcher: CodexDispatcher, waits: WaitDetecting = ProcessWaitDetector(),
                 appServerPID: @escaping @Sendable () -> pid_t? = { CodexAppServer.running()?.pid },
                 clock: @escaping @Sendable () -> Date = { Date() },
+                handoffHint: @escaping @Sendable (String) -> String = { _ in "请在 AgentRelay 主窗口的概览里确认或拒绝。" },
                 notify: @escaping @Sendable (Notice) -> Void) {
         self.paths = paths
         self.store = store
@@ -47,6 +50,7 @@ public final class RelayService: @unchecked Sendable {
         self.waits = waits
         self.appServerPID = appServerPID
         self.clock = clock
+        self.handoffHint = handoffHint
         self.notify = notify
     }
 
@@ -90,11 +94,26 @@ public final class RelayService: @unchecked Sendable {
         return p.group
     }
 
-    /// 给 Claude 的等信命令
-    public func waitCommand(_ name: String) -> String {
-        var cmd = "\"\(paths.bin)/relay-wait\" --mailbox \(name)"
+    /// 给 Claude 会话的等信命令：带上它的主人短码，信箱换了主人时等信会自己结束
+    public func waitCommand(for s: SessionRow) -> String {
+        var cmd = "\"\(paths.bin)/relay-wait\" --mailbox \(s.mailbox) --owner \(MailboxOwner.token(for: s))"
         if paths != RelayPaths.resolve(environment: [:]) { cmd += " --home \"\(paths.home)\"" }
         return cmd
+    }
+
+    /// 让每个信箱目录里的主人标记和登记一致（调用方已持有 lock）。
+    /// 在用的 Claude 会话写它的短码，其余已有的信箱目录写“没有主人”
+    func writeMailboxOwners() {
+        let active = ((try? store.sessions(status: .active)) ?? []).filter { $0.platform == .claude }
+        let owners = Dictionary(active.map { ($0.mailbox, MailboxOwner.token(for: $0)) }, uniquingKeysWith: { a, _ in a })
+        for name in Set(mailbox.mailboxNames()).union(owners.keys) {
+            try? mailbox.setOwner(owners[name], mailbox: name)
+        }
+    }
+
+    /// 同 `writeMailboxOwners`，自己加锁（宿主启动时、测试里用）
+    public func syncMailboxOwners() {
+        locked { writeMailboxOwners() }
     }
 
     func locked<T>(_ body: () throws -> T) rethrows -> T {
@@ -123,8 +142,13 @@ public final class RelayService: @unchecked Sendable {
     private func contactList(of me: SessionRow, group: String, reg: Registry) throws -> [ContactInfo] {
         try store.sessions(status: .active).filter { $0.id != me.id && liveGroup($0, reg) == group }.map {
             ContactInfo(mailbox: $0.mailbox, platform: $0.platform, project: $0.project,
-                        waiting: $0.platform == .claude ? waits.isWaiting(mailbox: $0.mailbox) : nil)
+                        waiting: $0.platform == .claude ? isWaiting($0) : nil)
         }
+    }
+
+    /// 这个 Claude 会话自己的等信命令有没有在运行
+    private func isWaiting(_ s: SessionRow) -> Bool {
+        waits.isWaiting(mailbox: s.mailbox, owner: MailboxOwner.token(for: s))
     }
 
     private func describe(_ contacts: [ContactInfo]) -> String {
@@ -156,6 +180,7 @@ public final class RelayService: @unchecked Sendable {
                     if let wanted = req.args.mailbox, wanted != existing.mailbox {
                         note = "本会话已经登记为 \(existing.mailbox)，信箱名不变（要改名请让用户在应用里操作）。"
                     }
+                    writeMailboxOwners()
                     return try registered(existing, group: group, reg: reg, note: note)
                 case .pendingHandoff:
                     throw RelayError(.mailboxTaken, "本会话想接手信箱 \(existing.mailbox)，正在等用户确认交接；确认后再调用 relay_register")
@@ -171,20 +196,29 @@ public final class RelayService: @unchecked Sendable {
             try MailboxName.validate(name)
             if let holder = try store.activeSession(mailbox: name) {
                 if holder.platform == id.platform, liveGroup(holder, reg) == group {
+                    // 已被接手的旧会话又来申请：先记下它原来的样子，被拒绝时恢复
+                    if let existing = try store.session(platform: id.platform, sessionID: id.sessionID), existing.status == .replaced {
+                        try store.saveHandoffRestore(existing)
+                    }
                     _ = try store.insertSession(platform: id.platform, sessionID: id.sessionID, hostSessionID: id.hostSessionID,
                                                 project: id.project.name, group: group, mailbox: name, recordCwd: id.record.cwd,
                                                 identitySource: id.source, status: .pendingHandoff, at: now)
                     let minutes = Int(now.timeIntervalSince(holder.lastActiveAt) / 60)
                     let where_ = holder.project == id.project.name ? "同一项目" : "项目 \(id.project.name)"
-                    alert("交接", "\(name) 想由新会话接手（\(where_)），旧会话最后活动 \(minutes) 分钟前。确认请在 relayd 控制台输入：handoff \(name)")
+                    alert("交接", "\(name) 想由新会话接手（\(where_)），旧会话最后活动 \(minutes) 分钟前。\(handoffHint(name))")
                     throw RelayError(.mailboxTaken, "信箱名 \(name) 已被同组的另一个会话占用。如果本会话是来接手它的，请让用户在 AgentRelay 里确认交接，确认后再调用 relay_register；否则换一个信箱名")
                 }
-                throw RelayError(.mailboxTaken, "信箱名 \(name) 已被占用，请换一个")
+                // 说清为什么不能交接：只有同一平台、同一分组的会话之间才能交接（设计方案第 8.3 节）
+                if holder.platform != id.platform {
+                    throw RelayError(.mailboxTaken, "信箱名 \(name) 已被一个 \(holder.platform.displayName) 会话占用。\(holder.platform.displayName) 和 \(id.platform.displayName) 的会话之间不能交接，请换一个信箱名")
+                }
+                throw RelayError(.mailboxTaken, "信箱名 \(name) 已被别的分组（或已停用项目）里的会话占用，不能交接，请换一个信箱名")
             }
             let row = try store.insertSession(platform: id.platform, sessionID: id.sessionID, hostSessionID: id.hostSessionID,
                                               project: id.project.name, group: group, mailbox: name, recordCwd: id.record.cwd,
                                               identitySource: id.source, status: .active, at: now)
             try store.addEvent(kind: "登记", summary: "\(name)（\(id.platform.displayName) · \(id.project.name)）登记到分组 \(group)", at: now)
+            writeMailboxOwners()
             if id.source == .selfReported {
                 alert("身份", "\(name) 的身份来自会话自报（没拿到 \(id.platform.displayName) 给出的编号），请留意")
             }
@@ -200,7 +234,7 @@ public final class RelayService: @unchecked Sendable {
         ]
         var result = WireResult(text: "")
         if s.platform == .claude {
-            let cmd = waitCommand(s.mailbox)
+            let cmd = waitCommand(for: s)
             lines.append("接下来请在后台运行下面的等信命令（有新信时它会结束并叫醒你）；每次用 relay_inbox 读完信后再运行一次：")
             lines.append(cmd)
             result.waitCommand = cmd
@@ -302,7 +336,7 @@ public final class RelayService: @unchecked Sendable {
         case .claude:
             try mailbox.setUnread(try store.unreadCount(toSession: recipient.id), mailbox: recipient.mailbox)
             result.delivery = .pending
-            let waiting = waits.isWaiting(mailbox: recipient.mailbox)
+            let waiting = isWaiting(recipient)
             result.text = "\(head)已放进 \(to) 的信箱。" + (waiting
                 ? "对方正在等信，会马上被叫醒。"
                 : "对方现在没在等信，信会留在信箱里；\(Int(limits.claudeUnreadNotifyAfter / 60)) 分钟后还没读，会提醒用户。")
@@ -374,13 +408,13 @@ public final class RelayService: @unchecked Sendable {
             if me.platform == .claude { try mailbox.setUnread(remaining, mailbox: me.mailbox) }
             var text = items.isEmpty ? "没有新信。" : "共 \(items.count) 封新信：\n\n" + items.map(\.text).joined(separator: "\n\n═══\n\n")
             if me.platform == .claude {
-                text += "\n\n读完后请重新在后台运行等信命令：\n\(waitCommand(me.mailbox))"
+                text += "\n\n读完后请重新在后台运行等信命令：\n\(waitCommand(for: me))"
             }
             var r = WireResult(text: text)
             r.mailbox = me.mailbox
             r.messages = items
             r.unread = remaining
-            if me.platform == .claude { r.waitCommand = waitCommand(me.mailbox) }
+            if me.platform == .claude { r.waitCommand = waitCommand(for: me) }
             return r
         }
     }
@@ -407,9 +441,8 @@ public final class RelayService: @unchecked Sendable {
         }
         var r = WireResult(text: "")
         if me.platform == .claude {
-            let waiting = waits.isWaiting(mailbox: me.mailbox)
-            lines.append(waiting ? "等信：正在等。" : "等信：没在等，请在后台运行：\(waitCommand(me.mailbox))")
-            r.waitCommand = waitCommand(me.mailbox)
+            lines.append(isWaiting(me) ? "等信：正在等。" : "等信：没在等，请在后台运行：\(waitCommand(for: me))")
+            r.waitCommand = waitCommand(for: me)
         }
         r.text = lines.joined(separator: "\n")
         r.mailbox = me.mailbox
@@ -429,11 +462,14 @@ public final class RelayService: @unchecked Sendable {
             }
             let old = try store.activeSession(mailbox: name)
             try store.confirmHandoff(from: old?.id, to: pending.id, at: clock())
+            _ = try store.takeHandoffRestore(session: pending.id)
             if pending.platform == .claude {
                 try mailbox.setUnread(try store.unreadCount(toSession: pending.id), mailbox: name)
             }
+            // 换主人：旧会话还在跑的等信命令会自己结束
+            writeMailboxOwners()
             try store.addEvent(kind: "交接", summary: "\(name) 改由新会话接手", at: clock())
-            return "已确认：\(name) 改由新会话接手，旧会话再调用会被拒绝。"
+            return "已确认：\(name) 改由新会话接手，旧会话再调用会被拒绝，它的等信命令会自己结束。"
         }
     }
 
@@ -449,6 +485,8 @@ public final class RelayService: @unchecked Sendable {
         let now = clock()
         lock.lock()
         defer { lock.unlock() }
+
+        writeMailboxOwners()
 
         if lastPurge == nil || now.timeIntervalSince(lastPurge!) >= 3_600 {
             if let n = try? store.purge(before: now.addingTimeInterval(-Double(limits.retentionDays) * 86_400)), n > 0 {
@@ -469,7 +507,7 @@ public final class RelayService: @unchecked Sendable {
         for s in (try? store.sessions(status: .active)) ?? [] where s.platform == .claude {
             guard let unread = try? store.unread(toSession: s.id), let oldest = unread.first, let newest = unread.last,
                   now.timeIntervalSince(oldest.createdAt) >= limits.claudeUnreadNotifyAfter,
-                  notifiedUnread[s.id] != newest.id, !waits.isWaiting(mailbox: s.mailbox) else { continue }
+                  notifiedUnread[s.id] != newest.id, !isWaiting(s) else { continue }
             notifiedUnread[s.id] = newest.id
             alert("未读", "\(s.mailbox) 有 \(unread.count) 封未读，它现在没在等信。请去那个会话说一声“收信”")
         }

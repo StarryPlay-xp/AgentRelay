@@ -25,7 +25,7 @@ final class FakeWaits: WaitDetecting, @unchecked Sendable {
     private let lock = NSLock()
     private var waiting: Set<String> = []
     func set(_ m: String, _ on: Bool) { lock.lock(); if on { waiting.insert(m) } else { waiting.remove(m) }; lock.unlock() }
-    func isWaiting(mailbox: String) -> Bool { lock.lock(); defer { lock.unlock() }; return waiting.contains(mailbox) }
+    func isWaiting(mailbox: String, owner: String) -> Bool { lock.lock(); defer { lock.unlock() }; return waiting.contains(mailbox) }
 }
 
 final class Box<T>: @unchecked Sendable {
@@ -155,7 +155,7 @@ struct ServiceTests {
         #expect(a.waitCommand == nil)
         let c = h.ok(h.claude(11), .register, WireArgs(mailbox: "claude-1"))
         #expect(c.contacts?.map(\.mailbox) == ["codex-a"])
-        #expect(c.waitCommand?.contains("relay-wait\" --mailbox claude-1 --home") == true)
+        #expect(c.waitCommand?.contains("relay-wait\" --mailbox claude-1 --owner \(MailboxOwner.token(sessionID: sampleID(11))) --home") == true)
         let again = h.ok(h.codex(1), .register, WireArgs(mailbox: "改名"))
         #expect(again.mailbox == "codex-a")
         #expect(again.text.contains("信箱名不变"))
@@ -239,7 +239,8 @@ struct ServiceTests {
         h.registerAll()
         _ = h.ok(h.codex(1), .send, WireArgs(to: "claude-1", body: "给旧会话的信"))
         h.fails(h.claude(12), .register, WireArgs(mailbox: "claude-1"), .mailboxTaken)
-        #expect(h.notices.get().contains { $0.kind == "交接" && $0.text.contains("handoff claude-1") })
+        // 应用里提示去概览确认，不再是开发工具 relayd 的控制台命令
+        #expect(h.notices.get().contains { $0.kind == "交接" && $0.text.contains("概览里确认") && !$0.text.contains("relayd") })
         h.fails(h.claude(12), .inbox, WireArgs(), .sessionNotRegistered)
         _ = try h.service.confirmHandoff(mailbox: "claude-1")
         h.fails(h.claude(11), .inbox, WireArgs(), .sessionNotRegistered)
@@ -248,12 +249,16 @@ struct ServiceTests {
         #expect(throws: RelayError.self) { try h.service.confirmHandoff(mailbox: "claude-1") }
     }
 
-    @Test("MAILBOX_TAKEN：别组或别的平台占用了这个名字，不提供交接")
+    @Test("MAILBOX_TAKEN：别组或别的平台占用了这个名字，不提供交接，并说明原因")
     func mailboxTakenOtherGroup() throws {
         let h = try Harness()
         _ = h.ok(h.claude(21), .register, WireArgs(mailbox: "same"))
         h.fails(h.claude(11), .register, WireArgs(mailbox: "same"), .mailboxTaken)
+        #expect(h.call(h.claude(11), .register, WireArgs(mailbox: "same")).error?.message.contains("别的分组") == true)
         h.fails(h.codex(1), .register, WireArgs(mailbox: "same"), .mailboxTaken)
+        let crossPlatform = h.call(h.codex(1), .register, WireArgs(mailbox: "same")).error?.message ?? ""
+        #expect(crossPlatform.contains("已被一个 Claude 会话占用"), "\(crossPlatform)")
+        #expect(crossPlatform.contains("Claude 和 Codex 的会话之间不能交接"), "\(crossPlatform)")
         #expect(!h.notices.get().contains { $0.kind == "交接" })
     }
 
