@@ -17,6 +17,18 @@ struct WaiterTests {
         #expect(Waiter.message(for: 3).contains("relay_inbox"))
     }
 
+    @Test("等信期间运行目录被删（AgentRelay 已卸载）：结束等信，不再空等")
+    func stopsWhenUninstalled() async throws {
+        let t = try TempDir()
+        let paths = RelayPaths.resolve(environment: ["AGENTRELAY_HOME": t.path + "/h"])
+        try paths.prepare()
+        let waiter = Waiter(paths: paths, mailbox: "claude-1", interval: 0.01)
+        let task = Task.detached { waiter.wait() }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        try FileManager.default.removeItem(atPath: paths.home)
+        if case .invalid(let why) = await task.value { #expect(why.contains("可能已卸载")) } else { Issue.record("应当结束等信") }
+    }
+
     @Test("信箱名不合规或运行目录不存在：直接报错，不等")
     func invalid() throws {
         let t = try TempDir()

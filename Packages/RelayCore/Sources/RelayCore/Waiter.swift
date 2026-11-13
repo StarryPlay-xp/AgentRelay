@@ -34,6 +34,10 @@ public struct Waiter: Sendable {
         let box = ClaudeMailbox(paths: paths)
         while true {
             if let n = box.unreadMarker(mailbox: mailbox), n > 0 { return .newMail(n) }
+            // AgentRelay 被卸载（运行目录被删）后不再空等
+            if !FileManager.default.fileExists(atPath: paths.run) {
+                return .invalid("AgentRelay 的运行目录不见了（可能已卸载），停止等信")
+            }
             Thread.sleep(forTimeInterval: interval)
         }
     }
