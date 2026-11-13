@@ -29,6 +29,8 @@ public struct RelayPaths: Sendable, Equatable {
     public func mailbox(_ name: String) -> String { mailboxes + "/" + name }
     /// 标记文件，内容是未读数
     public func mailboxMarker(_ name: String) -> String { mailbox(name) + "/new" }
+    /// 信箱主人标记，内容是当前主人的短码（没有主人时是 `-`）；等信命令据此判断自己还该不该等
+    public func mailboxOwner(_ name: String) -> String { mailbox(name) + "/owner" }
 
     /// 套接字路径的上限：`sockaddr_un.sun_path` 是 104 字节，含结尾的 0。
     public static let maxSocketPathBytes = 103

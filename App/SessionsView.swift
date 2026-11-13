@@ -23,11 +23,11 @@ struct SessionsView: View {
                     TableColumn("会话编号") { s in Text(String(s.sessionID.prefix(8)) + "…").monospaced().help("完整编号只在本机显示") }.width(100)
                     TableColumn("状态") { s in Text(Format.session(s.status)).foregroundStyle(s.status == .active ? .primary : .secondary) }.width(90)
                     TableColumn("等信") { s in
-                        if s.platform == .claude {
+                        if s.platform == .claude, s.status == .active {
                             Text(model.waiting.contains(s.mailbox) ? "正在等" : "没在等")
                                 .foregroundStyle(model.waiting.contains(s.mailbox) ? .green : .orange)
                         } else {
-                            Text("不需要").foregroundStyle(.secondary)
+                            Text(s.platform == .claude ? "—" : "不需要").foregroundStyle(.secondary)
                         }
                     }.width(70)
                     TableColumn("最后活动") { s in Text(Format.ago(s.lastActiveAt)) }.width(90)

@@ -29,9 +29,44 @@ extension Store {
         }
     }
 
-    /// 删除一个会话的登记（拒绝交接时用）
+    /// 删除一个会话的登记（拒绝全新会话的交接申请时用）
     public func deleteSession(id: Int) throws {
         try locked { try db.query("DELETE FROM sessions WHERE id = ?", [.int(id)]) }
+    }
+
+    /// 已被接手的旧会话申请接手某个信箱前，它原来的信箱名、项目、分组和登记时间
+    public struct HandoffRestore: Codable, Equatable, Sendable {
+        public var mailbox: String
+        public var project: String
+        public var group: String
+        public var registeredAt: Date
+    }
+
+    private static func handoffRestoreKey(_ id: Int) -> String { "handoff_restore.\(id)" }
+
+    /// 记下旧会话申请前的样子（申请会覆盖它的登记，被拒绝时要恢复）
+    public func saveHandoffRestore(_ s: SessionRow) throws {
+        let value = HandoffRestore(mailbox: s.mailbox, project: s.project, group: s.group, registeredAt: s.registeredAt)
+        let json = String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+        try locked { try setMeta(Self.handoffRestoreKey(s.id), json) }
+    }
+
+    /// 取出并删掉记下的样子；没有记录（申请的是全新会话）时为 nil
+    public func takeHandoffRestore(session id: Int) throws -> HandoffRestore? {
+        try locked {
+            let key = Self.handoffRestoreKey(id)
+            guard let json = try metaValue(key) else { return nil }
+            try db.query("DELETE FROM meta WHERE key = ?", [.text(key)])
+            return try? JSONDecoder().decode(HandoffRestore.self, from: Data(json.utf8))
+        }
+    }
+
+    /// 把被拒绝的旧会话恢复成“已被接手”，信箱名等改回申请前的样子
+    public func restoreReplaced(session id: Int, from r: HandoffRestore) throws {
+        try locked {
+            try db.query("UPDATE sessions SET status = 'replaced', mailbox = ?, project = ?, group_name = ?, registered_at = ? WHERE id = ?",
+                         [.text(r.mailbox), .text(r.project), .text(r.group), SQLValue(r.registeredAt), .int(id)])
+        }
     }
 
     /// 还没标为已处理的事件
@@ -82,13 +117,18 @@ extension RelayService {
         return items.sorted { $0.time > $1.time }
     }
 
-    /// 拒绝交接：删掉等待中的新会话登记，旧会话照常使用
+    /// 拒绝交接：信箱照旧由现在的会话使用。申请的是全新会话就删掉它的登记；
+    /// 是以前被接手过的旧会话就恢复成“已被接手”，保留它和往来信件的对应关系
     public func rejectHandoff(mailbox name: String) throws {
         try locked {
             guard let pending = try store.pendingHandoff(mailbox: name) else {
                 throw RelayError(.invalidArgument, "信箱 \(name) 没有待确认的交接")
             }
-            try store.deleteSession(id: pending.id)
+            if let restore = try store.takeHandoffRestore(session: pending.id) {
+                try store.restoreReplaced(session: pending.id, from: restore)
+            } else {
+                try store.deleteSession(id: pending.id)
+            }
             try store.addEvent(kind: "交接", summary: "拒绝了新会话接手 \(name)", at: clock())
         }
     }
@@ -107,11 +147,14 @@ extension RelayService {
                 guard s.status == .active else { return }
                 try store.setStatus(session: id, .disabled)
             }
+            // 停用后它的等信命令会自己结束；重新启用后它下次调用时会拿到新的等信命令
+            writeMailboxOwners()
             try store.addEvent(kind: "会话", summary: "\(enabled ? "启用" : "停用")了 \(s.mailbox)", at: clock())
         }
     }
 
-    /// 改信箱名；Claude 会话的未读标记跟着搬到新名字下（它要重新运行等信命令，下次读信时会拿到新命令）
+    /// 改信箱名；Claude 会话的未读标记跟着搬到新名字下。等在旧名字上的等信命令会自己结束，
+    /// 会话下次调用 relay_status 或读信时会拿到新名字的等信命令
     public func renameMailbox(session id: Int, to name: String) throws {
         try locked {
             guard let s = try store.session(id: id) else { throw RelayError(.invalidArgument, "没有这个会话") }
@@ -121,6 +164,7 @@ extension RelayService {
                 try mailbox.setUnread(0, mailbox: s.mailbox)
                 try mailbox.setUnread(try store.unreadCount(toSession: id), mailbox: name)
             }
+            writeMailboxOwners()
             try store.addEvent(kind: "会话", summary: "\(s.mailbox) 改名为 \(name)", at: clock())
         }
     }
