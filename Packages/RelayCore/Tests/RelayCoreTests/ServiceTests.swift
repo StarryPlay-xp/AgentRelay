@@ -249,12 +249,16 @@ struct ServiceTests {
         #expect(throws: RelayError.self) { try h.service.confirmHandoff(mailbox: "claude-1") }
     }
 
-    @Test("MAILBOX_TAKEN：别组或别的平台占用了这个名字，不提供交接")
+    @Test("MAILBOX_TAKEN：别组或别的平台占用了这个名字，不提供交接，并说明原因")
     func mailboxTakenOtherGroup() throws {
         let h = try Harness()
         _ = h.ok(h.claude(21), .register, WireArgs(mailbox: "same"))
         h.fails(h.claude(11), .register, WireArgs(mailbox: "same"), .mailboxTaken)
+        #expect(h.call(h.claude(11), .register, WireArgs(mailbox: "same")).error?.message.contains("别的分组") == true)
         h.fails(h.codex(1), .register, WireArgs(mailbox: "same"), .mailboxTaken)
+        let crossPlatform = h.call(h.codex(1), .register, WireArgs(mailbox: "same")).error?.message ?? ""
+        #expect(crossPlatform.contains("已被一个 Claude 会话占用"), "\(crossPlatform)")
+        #expect(crossPlatform.contains("Claude 和 Codex 的会话之间不能交接"), "\(crossPlatform)")
         #expect(!h.notices.get().contains { $0.kind == "交接" })
     }
 

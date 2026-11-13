@@ -208,7 +208,11 @@ public final class RelayService: @unchecked Sendable {
                     alert("交接", "\(name) 想由新会话接手（\(where_)），旧会话最后活动 \(minutes) 分钟前。\(handoffHint(name))")
                     throw RelayError(.mailboxTaken, "信箱名 \(name) 已被同组的另一个会话占用。如果本会话是来接手它的，请让用户在 AgentRelay 里确认交接，确认后再调用 relay_register；否则换一个信箱名")
                 }
-                throw RelayError(.mailboxTaken, "信箱名 \(name) 已被占用，请换一个")
+                // 说清为什么不能交接：只有同一平台、同一分组的会话之间才能交接（设计方案第 8.3 节）
+                if holder.platform != id.platform {
+                    throw RelayError(.mailboxTaken, "信箱名 \(name) 已被一个 \(holder.platform.displayName) 会话占用。\(holder.platform.displayName) 和 \(id.platform.displayName) 的会话之间不能交接，请换一个信箱名")
+                }
+                throw RelayError(.mailboxTaken, "信箱名 \(name) 已被别的分组（或已停用项目）里的会话占用，不能交接，请换一个信箱名")
             }
             let row = try store.insertSession(platform: id.platform, sessionID: id.sessionID, hostSessionID: id.hostSessionID,
                                               project: id.project.name, group: group, mailbox: name, recordCwd: id.record.cwd,
