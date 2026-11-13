@@ -1,0 +1,44 @@
+import Foundation
+
+/// relay-wait 的逻辑（设计方案第 5.3 节）：盯着信箱目录里的“有新信”标记，出现就打印一句提示并结束，
+/// Claude 会话因后台命令结束而被叫醒。只看标记里的未读数，不读信件内容；不设时间上限（F13）。
+public struct Waiter: Sendable {
+    public let paths: RelayPaths
+    public let mailbox: String
+    public let interval: TimeInterval
+
+    public init(paths: RelayPaths, mailbox: String, interval: TimeInterval = 1) {
+        self.paths = paths
+        self.mailbox = mailbox
+        self.interval = interval
+    }
+
+    public enum Outcome: Equatable, Sendable {
+        /// 有新信
+        case newMail(Int)
+        /// 参数或环境不对
+        case invalid(String)
+    }
+
+    public func check() throws {
+        try MailboxName.validate(mailbox)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: paths.run, isDirectory: &isDir), isDir.boolValue else {
+            throw RelayError(.relayNotRunning, "找不到 AgentRelay 的运行目录，AgentRelay 可能还没运行过")
+        }
+    }
+
+    /// 一直等到有新信
+    public func wait() -> Outcome {
+        do { try check() } catch let e as RelayError { return .invalid(e.message) } catch { return .invalid("\(error)") }
+        let box = ClaudeMailbox(paths: paths)
+        while true {
+            if let n = box.unreadMarker(mailbox: mailbox), n > 0 { return .newMail(n) }
+            Thread.sleep(forTimeInterval: interval)
+        }
+    }
+
+    public static func message(for n: Int) -> String {
+        "你有 \(n) 封新信，请调用 relay_inbox 读取；读完后再重新在后台运行等信命令。"
+    }
+}
