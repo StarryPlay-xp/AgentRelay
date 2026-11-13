@@ -64,6 +64,17 @@ public struct Project: Sendable, Equatable {
     public let group: String?
     public let enabled: Bool
     public let paths: [String]
+    /// 是否包含这个仓库的 Git 工作副本（设计方案第 7.2 节）
+    public let includeWorktrees: Bool
+
+    init(name: String, platform: Platform, group: String?, enabled: Bool, paths: [String], includeWorktrees: Bool = false) {
+        self.name = name
+        self.platform = platform
+        self.group = group
+        self.enabled = enabled
+        self.paths = paths
+        self.includeWorktrees = includeWorktrees
+    }
 
     /// 能用：已启用且已分组（设计方案第 7.4 节：必须选分组才能用）
     public var isUsable: Bool { enabled && group != nil }

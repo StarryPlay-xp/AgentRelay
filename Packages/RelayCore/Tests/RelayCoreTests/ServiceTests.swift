@@ -49,7 +49,8 @@ final class Harness: @unchecked Sendable {
     var service: RelayService!
     let dirA: String, dirB: String, dirOther: String
 
-    init(limits: Limits = Limits(), retryDelays: [TimeInterval] = [0.01, 0.01, 0.01]) throws {
+    /// - Parameter database: true 时登记表和上限都来自数据库（应用的用法），否则来自 JSON 文件（relayd 的用法）
+    init(limits: Limits = Limits(), retryDelays: [TimeInterval] = [0.01, 0.01, 0.01], database: Bool = false) throws {
         fx = try RecordFixture()
         paths = RelayPaths.resolve(environment: ["AGENTRELAY_HOME": fx.root.path + "/h"])
         try paths.prepare()
@@ -59,9 +60,24 @@ final class Harness: @unchecked Sendable {
         for d in [dirA, dirB, dirOther] { try FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true) }
         try writeRegistry()
         let store = try Store(path: paths.database)
+        let registry: RegistrySource
+        let limitsSource: @Sendable () -> Limits
+        if database {
+            try store.setLimits(limits)
+            let g1 = try store.addGroup("组甲"), g2 = try store.addGroup("组乙")
+            try store.addProject(NewProject(platform: .codex, name: "项目甲", source: .codexProjects, groupID: g1.id, mainPaths: [dirA]))
+            try store.addProject(NewProject(platform: .codex, name: "项目乙", source: .codexProjects, groupID: g1.id, mainPaths: [dirB]))
+            try store.addProject(NewProject(platform: .claude, name: "项目甲-Claude", source: .claudeConfig, groupID: g1.id, mainPaths: [dirA]))
+            try store.addProject(NewProject(platform: .claude, name: "别组-Claude", source: .manual, groupID: g2.id, mainPaths: [dirOther]))
+            registry = DatabaseRegistry(store: store)
+            limitsSource = { store.limits() }
+        } else {
+            registry = RegistryStore(path: paths.registry, userHome: fx.root.path)
+            limitsSource = { limits }
+        }
         service = RelayService(
-            paths: paths, store: store, registry: RegistryStore(path: paths.registry, userHome: fx.root.path),
-            resolver: IdentityResolver(locator: SessionRecordLocator(paths: fx.external)), limits: { limits },
+            paths: paths, store: store, registry: registry,
+            resolver: IdentityResolver(locator: SessionRecordLocator(paths: fx.external)), limits: limitsSource,
             dispatcher: CodexDispatcher(queuer: codex, retryDelays: retryDelays), waits: waits,
             appServerPID: { [appServer] in appServer.get() }, clock: { [now] in now.get() },
             notify: { [notices] n in notices.update { $0.append(n) } })

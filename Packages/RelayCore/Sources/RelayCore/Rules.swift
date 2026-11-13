@@ -1,7 +1,7 @@
 import Foundation
 
 /// 护栏的各项上限（设计方案第 14 节；默认值见第 24 节第 2 项）。
-public struct Limits: Sendable, Equatable {
+public struct Limits: Sendable, Equatable, Codable {
     /// 同一来回链最多往返几次
     public var hopLimit = 6
     /// 每两个信箱之间每小时最多几条（两个方向合计）

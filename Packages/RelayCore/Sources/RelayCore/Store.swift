@@ -113,7 +113,7 @@ public struct EventRow: Sendable, Equatable {
 /// 本机数据库（设计方案第 17 节）。第 2 步的分组和项目来自登记表文件，不在库里。
 /// 所有方法都加锁，可以在多个线程里调用。
 public final class Store: @unchecked Sendable {
-    private let db: SQLiteDatabase
+    let db: SQLiteDatabase
     private let lock = NSLock()
 
     public init(path: String) throws {
@@ -174,10 +174,39 @@ public final class Store: @unchecked Sendable {
         );
         INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '1');
         """)
+        // 第 3 步：分组、项目进数据库（设计方案第 17 节）；事件可以标为“已处理”
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL,
+            name TEXT NOT NULL UNIQUE,
+            source TEXT NOT NULL,
+            group_id INTEGER REFERENCES groups (id) ON DELETE SET NULL,
+            include_worktrees INTEGER NOT NULL DEFAULT 0,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS project_paths (
+            project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            PRIMARY KEY (project_id, path)
+        );
+        """)
+        let eventColumns = try db.query("PRAGMA table_info(events)").compactMap { $0.string("name") }
+        if !eventColumns.contains("acknowledged") {
+            try db.execute("ALTER TABLE events ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0")
+        }
+        try db.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
     }
 
     @discardableResult
-    private func locked<T>(_ body: () throws -> T) rethrows -> T {
+    func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
         return try body()
@@ -436,11 +465,11 @@ public final class Store: @unchecked Sendable {
         }
     }
 
-    private func metaValue(_ key: String) throws -> String? {
+    func metaValue(_ key: String) throws -> String? {
         try db.query("SELECT value FROM meta WHERE key = ?", [.text(key)]).first?.string("value")
     }
 
-    private func setMeta(_ key: String, _ value: String) throws {
+    func setMeta(_ key: String, _ value: String) throws {
         try db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                      [.text(key), .text(value)])
     }

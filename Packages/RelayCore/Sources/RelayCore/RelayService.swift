@@ -19,13 +19,13 @@ public final class RelayService: @unchecked Sendable {
     private let registry: RegistrySource
     private let resolver: IdentityResolver
     private let dispatcher: CodexDispatcher
-    private let mailbox: ClaudeMailbox
-    private let waits: WaitDetecting
+    let mailbox: ClaudeMailbox
+    let waits: WaitDetecting
     private let appServerPID: @Sendable () -> pid_t?
-    private let clock: @Sendable () -> Date
+    let clock: @Sendable () -> Date
     private let notify: @Sendable (Notice) -> Void
 
-    private let lock = NSLock()
+    let lock = NSLock()
     private var notifiedUnread: [Int: String] = [:]
     private var appServerSeen = false
     private var lastAppServerPID: pid_t?
@@ -73,7 +73,7 @@ public final class RelayService: @unchecked Sendable {
 
     // MARK: 共用
 
-    private func alert(_ kind: String, _ text: String) {
+    func alert(_ kind: String, _ text: String) {
         try? store.addEvent(kind: kind, summary: text, at: clock())
         notify(Notice(kind: kind, text: text))
     }
@@ -97,7 +97,7 @@ public final class RelayService: @unchecked Sendable {
         return cmd
     }
 
-    private func locked<T>(_ body: () throws -> T) rethrows -> T {
+    func locked<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
         return try body()
