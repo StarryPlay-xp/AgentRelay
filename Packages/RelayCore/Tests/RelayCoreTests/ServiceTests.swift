@@ -61,7 +61,7 @@ final class Harness: @unchecked Sendable {
         let store = try Store(path: paths.database)
         service = RelayService(
             paths: paths, store: store, registry: RegistryStore(path: paths.registry, userHome: fx.root.path),
-            resolver: IdentityResolver(locator: SessionRecordLocator(paths: fx.external)), limits: limits,
+            resolver: IdentityResolver(locator: SessionRecordLocator(paths: fx.external)), limits: { limits },
             dispatcher: CodexDispatcher(queuer: codex, retryDelays: retryDelays), waits: waits,
             appServerPID: { [appServer] in appServer.get() }, clock: { [now] in now.get() },
             notify: { [notices] n in notices.update { $0.append(n) } })

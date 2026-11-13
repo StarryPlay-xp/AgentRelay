@@ -29,6 +29,15 @@ struct WaiterTests {
         if case .invalid(let why) = await task.value { #expect(why.contains("可能已卸载")) } else { Issue.record("应当结束等信") }
     }
 
+    @Test("命令行参数解析")
+    func parse() {
+        #expect(RelayWaitCommand.parse(["--mailbox", "claude-1"]) == .init(mailbox: "claude-1", home: nil))
+        #expect(RelayWaitCommand.parse(["--mailbox", "claude-1", "--home", "/tmp/h"]) == .init(mailbox: "claude-1", home: "/tmp/h"))
+        #expect(RelayWaitCommand.parse([]) == nil)
+        #expect(RelayWaitCommand.parse(["--mailbox"]) == nil)
+        #expect(RelayWaitCommand.parse(["--mailbox", "a", "--其他"]) == nil)
+    }
+
     @Test("信箱名不合规或运行目录不存在：直接报错，不等")
     func invalid() throws {
         let t = try TempDir()

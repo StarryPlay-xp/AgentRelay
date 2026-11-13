@@ -15,8 +15,8 @@ public struct Notice: Sendable, Equatable {
 public final class RelayService: @unchecked Sendable {
     public let paths: RelayPaths
     public let store: Store
-    public let limits: Limits
-    private let registry: RegistryStore
+    private let limitsProvider: @Sendable () -> Limits
+    private let registry: RegistrySource
     private let resolver: IdentityResolver
     private let dispatcher: CodexDispatcher
     private let mailbox: ClaudeMailbox
@@ -31,14 +31,15 @@ public final class RelayService: @unchecked Sendable {
     private var lastAppServerPID: pid_t?
     private var lastPurge: Date?
 
-    public init(paths: RelayPaths, store: Store, registry: RegistryStore, resolver: IdentityResolver,
-                limits: Limits = Limits(), dispatcher: CodexDispatcher, waits: WaitDetecting = ProcessWaitDetector(),
+    /// - Parameter limits: 每次取最新的上限（应用里来自设置，可以随时改）
+    public init(paths: RelayPaths, store: Store, registry: RegistrySource, resolver: IdentityResolver,
+                limits: @escaping @Sendable () -> Limits = { Limits() }, dispatcher: CodexDispatcher, waits: WaitDetecting = ProcessWaitDetector(),
                 appServerPID: @escaping @Sendable () -> pid_t? = { CodexAppServer.running()?.pid },
                 clock: @escaping @Sendable () -> Date = { Date() },
                 notify: @escaping @Sendable (Notice) -> Void) {
         self.paths = paths
         self.store = store
-        self.limits = limits
+        self.limitsProvider = limits
         self.registry = registry
         self.resolver = resolver
         self.dispatcher = dispatcher
@@ -66,6 +67,9 @@ public final class RelayService: @unchecked Sendable {
             return .failure(RelayError(.internalError, "\(error)"))
         }
     }
+
+    /// 当前的各项上限
+    public var limits: Limits { limitsProvider() }
 
     // MARK: 共用
 

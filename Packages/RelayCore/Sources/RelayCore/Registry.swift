@@ -185,8 +185,14 @@ public enum PathMatcher {
     }
 }
 
+/// 登记表的来源：第 2 步是 JSON 文件（`RegistryStore`），应用里是数据库（`DatabaseRegistry`）。
+public protocol RegistrySource: Sendable {
+    /// 返回最新的登记表；`error` 是这次读取遇到的问题（如果有），只报告一次
+    func snapshot() -> (registry: Registry, error: RelayError?)
+}
+
 /// 登记表文件改了就自动重读；读坏了保留上一次的内容，并把错误交给调用方记录。
-public final class RegistryStore: @unchecked Sendable {
+public final class RegistryStore: RegistrySource, @unchecked Sendable {
     private let path: String
     private let userHome: String
     private let lock = NSLock()
