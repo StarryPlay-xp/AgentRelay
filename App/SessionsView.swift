@@ -103,8 +103,13 @@ private struct SessionRowView: View {
             .opacity(dimmed ? 0.55 : 1)
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 5) {
+                // 只有在用的 Claude 会话才看等信；已被接手、已停用、等确认交接的显示“—”，Codex 不需要等信
                 if session.platform == .claude && session.status == .active {
                     WaitingLabel(waiting: model.waiting.contains(session.mailbox))
+                } else {
+                    Text(session.platform == .claude ? "—" : "不需要等信")
+                        .font(Fonts.small)
+                        .foregroundStyle(Palette.ink3)
                 }
                 Text(Format.ago(session.lastActiveAt)).font(Fonts.small).foregroundStyle(Palette.ink3)
                     .help("最后活动：\(Format.time(session.lastActiveAt))")
