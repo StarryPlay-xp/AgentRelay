@@ -56,9 +56,47 @@ swift test
 - 先 `swift build` 再 `swift test`：集成测试会起真实的 `relayd`、`relay-mcp`、`relay-wait` 进程，全部在临时目录里跑，codex 用假脚本，不会碰到你真实的 Codex、Claude 会话。
 - 测试只用合成数据，会话编号用固定示例 `00000000-0000-4000-8000-0000000000NN`。
 
+### 构建和运行桌面应用
+
+桌面应用在 `App/`，工程是 `AgentRelay.xcodeproj`（需要 Xcode 16 以上，macOS 14 以上）。中转核心在应用里运行，菜单栏常驻；`relay-mcp`、`relay-wait` 两个命令行程序打进应用包的 `Contents/Helpers/`，应用启动时在数据目录的 `bin/` 下建指向它们的符号链接。
+
+- **在 Xcode 里运行**：打开工程，选 `AgentRelay` 方案，点运行。共享的构建方案已带启动参数 `-AgentRelayHome ~/.agentrelay-dev`，开发数据和以后正式用的 `~/.agentrelay` 分开；菜单栏面板会显示“开发数据目录”。
+- **命令行构建**（产物在 `build/`，不进仓库）：
+
+```bash
+xcodebuild -project AgentRelay.xcodeproj -scheme AgentRelay -configuration Debug -derivedDataPath build/DerivedData build
+```
+
+- **命令行运行**，同样带上开发数据目录：
+
+```bash
+build/DerivedData/Build/Products/Debug/AgentRelay.app/Contents/MacOS/AgentRelay -AgentRelayHome ~/.agentrelay-dev
+```
+
+- 不带这个参数打开开发构建（例如在访达里双击、用 `open`），会用正式的默认位置：`~/.agentrelay`、`~/Library/Application Support/AgentRelay`、`~/Library/Logs/AgentRelay`。环境变量 `AGENTRELAY_HOME` 的优先级高于启动参数。
+- 同一个数据目录只能有一份 AgentRelay 在运行，再打开一份会提示“已经在运行”并退出。
+- **签名**：没有 `Config/Local.xcconfig` 时，应用标识是 `local.dev.AgentRelay`，按“仅在本机运行”签名，克隆下来就能构建。要用自己的开发者团队签名，把 `Config/Local.xcconfig.example` 复制成 `Config/Local.xcconfig` 再填写；这个文件不进仓库。
+- 界面文字目前只有中文，集中在 `App/Localizable.xcstrings`；Xcode 构建时会把新增的文字收进这个文件，改界面时随改动一起提交。
+- 一键接入 Codex、Claude 的配置向导还没做（开发计划第 4 步），开发时按下一节手动接入。
+
+### 开发时手动接入 Codex 和 Claude
+
+把 `<数据目录>` 换成应用或 relayd 用的数据目录（例如 `~/.agentrelay-dev`）。接入 Codex（全局）和 Claude（只对某个项目目录，在该目录里执行；名字要写在 `-e` 前面）：
+
+```bash
+codex mcp add agent-relay --env AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
+```
+
+```bash
+claude mcp add --scope local agent-relay -e AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
+```
+
+- 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope local agent-relay` 卸载。
+- 装好后要新开会话才能用。Claude 会话登记后，按返回结果在后台运行等信命令。
+
 ### 开发用中转进程 relayd
 
-桌面应用做好之前，用 `relayd` 代替中转核心。建议用独立的数据目录，和以后正式用的 `~/.agentrelay` 分开：
+`relayd` 是不带界面的命令行中转进程，集成测试用它，也可以在开发时代替桌面应用。和桌面应用一样，建议用独立的数据目录：
 
 ```bash
 .build/debug/relayd --home ~/.agentrelay-dev
@@ -76,20 +114,10 @@ swift test
 }
 ```
 
-- `<数据目录>/bin/` 下放两个符号链接 `relay-mcp`、`relay-wait`，指向构建产物。
-- 接入 Codex（全局）和 Claude（只对某个项目目录，在该目录里执行；名字要写在 `-e` 前面）：
-
-```bash
-codex mcp add agent-relay --env AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
-```
-
-```bash
-claude mcp add --scope local agent-relay -e AGENTRELAY_HOME=<数据目录> -- <数据目录>/bin/relay-mcp
-```
-
+- relayd 不建链接：`<数据目录>/bin/` 下要自己放两个符号链接 `relay-mcp`、`relay-wait`，指向包的构建产物。接入两边的命令见上一节。
 - 控制台命令：`status`、`sessions`、`messages`、`events`、`pause`、`resume`、`handoff <信箱名>`（确认交接）、`reload`、`quit`。
 - 默认按正式模式核对对端：relay-mcp 必须由带厂商签名的 Codex 或 Claude Code 拉起。`--dev-relax-peer-check` 只供测试；`--codex <路径>` 固定使用某个 codex 程序。
-- 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope local agent-relay` 卸载。
+- 同一个数据目录同时只能运行桌面应用和 relayd 中的一个。
 
 ## 隐私约定
 
