@@ -1,0 +1,17 @@
+// AgentRelay 的公共编译设置（进仓库）。
+// 个人设置（开发者团队编号、应用标识前缀、签名方式）写在同目录的 Local.xcconfig，不进仓库，格式见 Local.xcconfig.example。
+// 没有 Local.xcconfig 时，按“仅在本机运行”签名，应用标识为 local.dev.AgentRelay，任何人克隆后都能直接构建。
+
+SDKROOT = macosx
+MACOSX_DEPLOYMENT_TARGET = 14.0
+SWIFT_VERSION = 6.0
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+AGENTRELAY_BUNDLE_PREFIX = local.dev
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+ENABLE_HARDENED_RUNTIME = YES
+
+#include? "Local.xcconfig"

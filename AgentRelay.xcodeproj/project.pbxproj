@@ -1,0 +1,474 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA0000000000000000000050 /* RelayCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000061 /* RelayCore */; };
+		AA0000000000000000000051 /* RelayMCP in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000062 /* RelayMCP */; };
+		AA0000000000000000000052 /* RelayCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000063 /* RelayCore */; };
+		AA0000000000000000000053 /* relay-mcp in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* relay-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AA0000000000000000000054 /* relay-wait in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* relay-wait */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		AA0000000000000000000070 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000031;
+			remoteInfo = RelayMCPHelper;
+		};
+		AA0000000000000000000071 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000032;
+			remoteInfo = RelayWaitHelper;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		AA0000000000000000000043 /* Embed Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				AA0000000000000000000053 /* relay-mcp in Embed Helpers */,
+				AA0000000000000000000054 /* relay-wait in Embed Helpers */,
+			);
+			name = "Embed Helpers";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		AA0000000000000000000005 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
+		AA0000000000000000000006 /* Local.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text; path = Local.xcconfig.example; sourceTree = "<group>"; };
+		AA0000000000000000000020 /* AgentRelay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentRelay.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000021 /* relay-mcp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "relay-mcp"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000022 /* relay-wait */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "relay-wait"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA0000000000000000000010 /* App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = App;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000011 /* relay-mcp */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "relay-mcp";
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000012 /* relay-wait */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "relay-wait";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA0000000000000000000041 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000050 /* RelayCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000045 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000051 /* RelayMCP in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000047 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000052 /* RelayCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA0000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000010 /* App */,
+				AA0000000000000000000013 /* Tools */,
+				AA0000000000000000000004 /* Config */,
+				AA0000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000020 /* AgentRelay.app */,
+				AA0000000000000000000021 /* relay-mcp */,
+				AA0000000000000000000022 /* relay-wait */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000004 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000005 /* Shared.xcconfig */,
+				AA0000000000000000000006 /* Local.xcconfig.example */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000013 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000011 /* relay-mcp */,
+				AA0000000000000000000012 /* relay-wait */,
+			);
+			path = Tools;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0000000000000000000030 /* AgentRelay */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000081 /* Build configuration list for PBXNativeTarget "AgentRelay" */;
+			buildPhases = (
+				AA0000000000000000000040 /* Sources */,
+				AA0000000000000000000041 /* Frameworks */,
+				AA0000000000000000000042 /* Resources */,
+				AA0000000000000000000043 /* Embed Helpers */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0000000000000000000072 /* PBXTargetDependency */,
+				AA0000000000000000000073 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000010 /* App */,
+			);
+			name = AgentRelay;
+			packageProductDependencies = (
+				AA0000000000000000000061 /* RelayCore */,
+			);
+			productName = AgentRelay;
+			productReference = AA0000000000000000000020 /* AgentRelay.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AA0000000000000000000031 /* RelayMCPHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000082 /* Build configuration list for PBXNativeTarget "RelayMCPHelper" */;
+			buildPhases = (
+				AA0000000000000000000044 /* Sources */,
+				AA0000000000000000000045 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000011 /* relay-mcp */,
+			);
+			name = RelayMCPHelper;
+			packageProductDependencies = (
+				AA0000000000000000000062 /* RelayMCP */,
+			);
+			productName = "relay-mcp";
+			productReference = AA0000000000000000000021 /* relay-mcp */;
+			productType = "com.apple.product-type.tool";
+		};
+		AA0000000000000000000032 /* RelayWaitHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000083 /* Build configuration list for PBXNativeTarget "RelayWaitHelper" */;
+			buildPhases = (
+				AA0000000000000000000046 /* Sources */,
+				AA0000000000000000000047 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000012 /* relay-wait */,
+			);
+			name = RelayWaitHelper;
+			packageProductDependencies = (
+				AA0000000000000000000063 /* RelayCore */,
+			);
+			productName = "relay-wait";
+			productReference = AA0000000000000000000022 /* relay-wait */;
+			productType = "com.apple.product-type.tool";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+			};
+			buildConfigurationList = AA0000000000000000000080 /* Build configuration list for PBXProject "AgentRelay" */;
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = AA0000000000000000000002;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA0000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AA0000000000000000000030 /* AgentRelay */,
+				AA0000000000000000000031 /* RelayMCPHelper */,
+				AA0000000000000000000032 /* RelayWaitHelper */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA0000000000000000000042 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA0000000000000000000040 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000044 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000046 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0000000000000000000072 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000031 /* RelayMCPHelper */;
+			targetProxy = AA0000000000000000000070 /* PBXContainerItemProxy */;
+		};
+		AA0000000000000000000073 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000032 /* RelayWaitHelper */;
+			targetProxy = AA0000000000000000000071 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000000000000000000090 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA0000000000000000000005 /* Shared.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000091 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = AA0000000000000000000005 /* Shared.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		AA0000000000000000000092 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AgentRelay;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).AgentRelay";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AgentRelay;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).AgentRelay";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000094 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-mcp";
+				PRODUCT_MODULE_NAME = RelayMCPHelper;
+				PRODUCT_NAME = "relay-mcp";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-mcp";
+				PRODUCT_MODULE_NAME = RelayMCPHelper;
+				PRODUCT_NAME = "relay-mcp";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000096 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-wait";
+				PRODUCT_MODULE_NAME = RelayWaitHelper;
+				PRODUCT_NAME = "relay-wait";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000097 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-wait";
+				PRODUCT_MODULE_NAME = RelayWaitHelper;
+				PRODUCT_NAME = "relay-wait";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA0000000000000000000080 /* Build configuration list for PBXProject "AgentRelay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000090 /* Debug */,
+				AA0000000000000000000091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000081 /* Build configuration list for PBXNativeTarget "AgentRelay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000092 /* Debug */,
+				AA0000000000000000000093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000082 /* Build configuration list for PBXNativeTarget "RelayMCPHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000094 /* Debug */,
+				AA0000000000000000000095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000083 /* Build configuration list for PBXNativeTarget "RelayWaitHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000096 /* Debug */,
+				AA0000000000000000000097 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RelayCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA0000000000000000000061 /* RelayCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */;
+			productName = RelayCore;
+		};
+		AA0000000000000000000062 /* RelayMCP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */;
+			productName = RelayMCP;
+		};
+		AA0000000000000000000063 /* RelayCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */;
+			productName = RelayCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = AA0000000000000000000001 /* Project object */;
+}
