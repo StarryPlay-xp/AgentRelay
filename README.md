@@ -83,7 +83,7 @@ build/DerivedData/Build/Products/Debug/AgentRelay.app/Contents/MacOS/AgentRelay 
 
 - 不带这个参数打开开发构建（例如在访达里双击、用 `open`），会用正式的默认位置：`~/.agentrelay`、`~/Library/Application Support/AgentRelay`、`~/Library/Logs/AgentRelay`。环境变量 `AGENTRELAY_HOME` 的优先级高于启动参数。
 - 同一个数据目录只能有一份 AgentRelay 在运行，再打开一份会提示“已经在运行”并退出。
-- **签名**：没有 `Config/Local.xcconfig` 时，应用标识是 `local.dev.AgentRelay`，按“仅在本机运行”签名，克隆下来就能构建。要用自己的开发者团队签名，把 `Config/Local.xcconfig.example` 复制成 `Config/Local.xcconfig` 再填写；这个文件不进仓库。
+- **签名**：没有 `Config/Local.xcconfig` 时，正式构建的应用标识是 `local.dev.AgentRelay`，按“仅在本机运行”签名，克隆下来就能构建。调试构建的标识是 `local.dev.AgentRelay.dev`，显示为“AgentRelay 开发版”：和正式版在系统里是两个应用，通知设置、登录项、偏好设置各自独立。要用自己的开发者团队签名，把 `Config/Local.xcconfig.example` 复制成 `Config/Local.xcconfig` 再填写；这个文件不进仓库。
 - 界面文字目前只有中文，集中在 `App/Localizable.xcstrings`；Xcode 构建时会把新增的文字收进这个文件，改界面时随改动一起提交。
 - 接入 Codex、Claude：在应用的“接入”页一键完成。数据目录不是默认位置时（例如开发数据目录），会把 `AGENTRELAY_HOME` 一并写进两边的配置。也可以按下一节手动接入。
 
