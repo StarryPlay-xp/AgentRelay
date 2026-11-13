@@ -193,6 +193,16 @@ public protocol WaitDetecting: Sendable {
 public struct ProcessWaitDetector: WaitDetecting {
     public init() {}
 
+    /// 现在有 relay-wait 在等的所有信箱（界面刷新时一次扫完，不必逐个信箱扫）
+    public static func waitingMailboxes() -> Set<String> {
+        var out = Set<String>()
+        for pid in Processes.find({ _, path, _ in (path as NSString).lastPathComponent == "relay-wait" }) {
+            guard let args = Processes.arguments(of: pid), let i = args.firstIndex(of: "--mailbox"), i + 1 < args.count else { continue }
+            out.insert(args[i + 1])
+        }
+        return out
+    }
+
     public func isWaiting(mailbox: String) -> Bool {
         !Processes.find { _, path, args in
             guard (path as NSString).lastPathComponent == "relay-wait",
