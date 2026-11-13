@@ -4,6 +4,11 @@ import Foundation
 public struct Notice: Sendable, Equatable {
     public let kind: String
     public let text: String
+
+    public init(kind: String, text: String) {
+        self.kind = kind
+        self.text = text
+    }
 }
 
 /// 中转核心的业务逻辑：五个工具、护栏、投递、定时检查（设计方案第 8～14 节）。
