@@ -1,11 +1,12 @@
 // relayd：开发用中转进程，第 3 步由桌面应用取代。
 //
-// 用法：relayd [--home <AGENTRELAY_HOME>] [--codex <codex 程序路径>] [--dev-relax-peer-check] [--no-console]
+// 用法：relayd [--home <AGENTRELAY_HOME>] [--codex <codex 程序路径>] [--dev-relax-peer-check] [--no-console] [--check-interval <秒>]
 //
 //   --home                  运行时文件和数据放在这个目录（等同于设置 AGENTRELAY_HOME）
 //   --codex                 固定使用这个 codex 程序（测试时指向假脚本，避免把信送进真实的 Codex）
 //   --dev-relax-peer-check  只核对对端是同一用户，不核对 relay-mcp 路径和父进程签名（仅开发、测试）
 //   --no-console            不读标准输入里的控制台命令，收到 SIGINT/SIGTERM 时退出
+//   --check-interval        定时检查的间隔，默认 30 秒（测试时调短）
 //
 // 控制台命令：help、status、sessions、messages [条数]、events [条数]、pause、resume、handoff <信箱名>、reload、quit
 import Darwin
@@ -28,7 +29,7 @@ func stamp(_ d: Date = Date()) -> String {
 }
 
 func usage() -> Never {
-    say("用法：relayd [--home <目录>] [--codex <codex 程序路径>] [--dev-relax-peer-check] [--no-console]")
+    say("用法：relayd [--home <目录>] [--codex <codex 程序路径>] [--dev-relax-peer-check] [--no-console] [--check-interval <秒>]")
     exit(2)
 }
 
@@ -38,6 +39,7 @@ var home: String?
 var codexPath: String?
 var relaxed = false
 var console = true
+var checkInterval: Double = 30
 var it = CommandLine.arguments.dropFirst().makeIterator()
 while let a = it.next() {
     switch a {
@@ -45,6 +47,9 @@ while let a = it.next() {
     case "--codex": codexPath = it.next() ?? { usage() }()
     case "--dev-relax-peer-check": relaxed = true
     case "--no-console": console = false
+    case "--check-interval":
+        guard let v = it.next().flatMap(Double.init), v > 0 else { usage() }
+        checkInterval = v
     default: usage()
     }
 }
@@ -102,8 +107,9 @@ do { try server.start() } catch {
     exit(1)
 }
 
-let timer = DispatchSource.makeTimerSource(queue: .global())
-timer.schedule(deadline: .now() + 30, repeating: 30)
+// 定时检查放在主队列：顶层代码属于主线程，放到其他队列运行会被 Swift 6 的运行时检查判为越界而退出
+let timer = DispatchSource.makeTimerSource(queue: .main)
+timer.schedule(deadline: .now() + checkInterval, repeating: checkInterval)
 timer.setEventHandler { service.runPeriodicChecks() }
 timer.resume()
 service.runPeriodicChecks()

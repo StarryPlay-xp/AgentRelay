@@ -15,11 +15,16 @@ func binary(_ name: String) throws -> String {
     guard let binDate = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date else {
         throw TestFailure("找不到 \(name)，请先在 Packages/RelayCore 里运行 swift build")
     }
-    let sources = FileManager.default.enumerator(atPath: packageRoot + "/Sources")
-    while let f = sources?.nextObject() as? String {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: packageRoot + "/Sources/" + f)
-        if let d = attrs?[.modificationDate] as? Date, d > binDate, f.hasSuffix(".swift") {
-            throw TestFailure("\(name) 比源码旧，请先运行 swift build")
+    // 只和这个程序用到的源码比
+    let dirs = [name, "RelayCore"] + (name == "relay-mcp" ? ["RelayMCP"] : [])
+    for dir in dirs {
+        let base = packageRoot + "/Sources/" + dir
+        let files = FileManager.default.enumerator(atPath: base)
+        while let f = files?.nextObject() as? String {
+            let attrs = try? FileManager.default.attributesOfItem(atPath: base + "/" + f)
+            if let d = attrs?[.modificationDate] as? Date, d > binDate, f.hasSuffix(".swift") {
+                throw TestFailure("\(name) 比源码旧，请先运行 swift build")
+            }
         }
     }
     return path
@@ -138,7 +143,7 @@ final class World: @unchecked Sendable {
         var env = baseEnv
         env["CODEX_HOME"] = root + "/cx"
         env["CLAUDE_CONFIG_DIR"] = root + "/cl"
-        var args = ["--codex", fakeCodex]
+        var args = ["--codex", fakeCodex, "--check-interval", "0.2"]
         if relaxed { args.append("--dev-relax-peer-check") }
         let d = try Running(try binary("relayd"), args, env: env)
         guard d.output.waitFor("中转核心已启动") else { throw TestFailure("relayd 没启动：\(d.output.all)") }
@@ -268,6 +273,16 @@ struct EndToEndTests {
         #expect(r.isError)
         #expect(r.text.contains("不是由 Codex 或 Claude Code 启动的"), "\(r.text)")
         #expect(d.output.waitFor("【拒绝】"))
+    }
+
+    @Test("定时检查跑过多轮后 relayd 仍在运行（曾因定时任务不在主线程而崩溃）")
+    func survivesPeriodicChecks() throws {
+        let w = try World()
+        let d = try w.startRelayd()
+        defer { d.stop() }
+        usleep(1_200_000)
+        #expect(d.process.isRunning, "relayd 退出了：\(d.output.all)")
+        #expect(!(try w.tool("relay_register", ["mailbox": "codex-a"], codex: 1).isError))
     }
 
     @Test("同一位置只能起一个 relayd")
