@@ -21,7 +21,7 @@ final class SQLiteDatabase {
         // 先建好 0600 的空文件，避免数据库文件按默认权限创建
         if !FileManager.default.fileExists(atPath: path) {
             let fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
-            if fd >= 0 { close(fd) }
+            if fd >= 0 { Darwin.close(fd) }
         }
         guard sqlite3_open_v2(path, &handle, flags, nil) == SQLITE_OK else {
             let msg = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "未知错误"
@@ -34,6 +34,12 @@ final class SQLiteDatabase {
     }
 
     deinit { sqlite3_close(handle) }
+
+    /// 提前关闭（完全卸载删除数据库文件之前用）；关闭后再查询会报错
+    func close() {
+        sqlite3_close(handle)
+        handle = nil
+    }
 
     func execute(_ sql: String) throws {
         var err: UnsafeMutablePointer<CChar>?

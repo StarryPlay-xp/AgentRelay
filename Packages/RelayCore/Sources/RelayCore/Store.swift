@@ -202,7 +202,27 @@ public final class Store: @unchecked Sendable {
         if !eventColumns.contains("acknowledged") {
             try db.execute("ALTER TABLE events ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0")
         }
-        try db.execute("UPDATE meta SET value = '2' WHERE key = 'schema_version'")
+        // 第 4 步：配置改动记录（设计方案第 17 节）
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS config_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            time REAL NOT NULL,
+            platform TEXT NOT NULL,
+            action TEXT NOT NULL,
+            target TEXT NOT NULL,
+            file_existed INTEGER NOT NULL,
+            backup_path TEXT,
+            snapshot_path TEXT,
+            summary TEXT NOT NULL,
+            ok INTEGER NOT NULL
+        );
+        """)
+        try db.execute("UPDATE meta SET value = '3' WHERE key = 'schema_version'")
+    }
+
+    /// 提前关闭数据库（完全卸载删除数据文件之前用）；关闭后再调用任何方法都会报错
+    public func close() {
+        locked { db.close() }
     }
 
     @discardableResult

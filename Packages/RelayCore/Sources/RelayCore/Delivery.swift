@@ -84,30 +84,6 @@ public struct CodexCLI: CodexQueueing {
     }
 }
 
-/// 在后台读完子进程输出，避免输出太多时子进程卡住
-private final class OutputCollector: @unchecked Sendable {
-    private var data = Data()
-    private let lock = NSLock()
-    private let finished = DispatchSemaphore(value: 0)
-
-    init(_ handle: FileHandle) {
-        DispatchQueue.global().async { [self] in
-            let d = handle.readDataToEndOfFile()
-            lock.lock()
-            data = d
-            lock.unlock()
-            finished.signal()
-        }
-    }
-
-    func finish() -> String {
-        _ = finished.wait(timeout: .now() + 2)
-        lock.lock()
-        defer { lock.unlock() }
-        return String(decoding: data, as: UTF8.self)
-    }
-}
-
 /// 给 Codex 投递：同一收件会话串行（保证对方按发信顺序执行），不同会话并行（F21）；失败按间隔重试。
 public final class CodexDispatcher: @unchecked Sendable {
     public typealias Report = @Sendable (_ messageID: String, _ outcome: CodexQueueOutcome, _ final: Bool) -> Void
