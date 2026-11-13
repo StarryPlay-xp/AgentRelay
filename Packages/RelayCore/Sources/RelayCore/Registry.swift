@@ -150,7 +150,11 @@ public struct Registry: Sendable, Equatable {
                 if best == nil || root.count > best!.length { best = (project, root.count) }
             }
         }
-        return best?.project
+        if let best { return best.project }
+        // 不在任何登记目录里：看它是不是某个勾选了“包含 Git 工作副本”的项目的副本（设计方案第 7.2 节）
+        let candidates = projects.filter { $0.platform == platform && $0.includeWorktrees }
+        guard !candidates.isEmpty, let common = GitRepo.commonDir(containing: target) else { return nil }
+        return candidates.first { p in p.paths.contains { GitRepo.commonDir(containing: $0) == common } }
     }
 
     public func project(named name: String) -> Project? {

@@ -102,13 +102,17 @@ public final class SessionRecordLocator: SessionRecordLocating, @unchecked Senda
         return nil
     }
 
-    /// 读文件开头的若干行（不超过 maxHeadBytes）
     private func readLines(_ path: String, maxLines: Int) -> [Data] {
+        Self.readLines(path, maxLines: maxLines, maxBytes: maxHeadBytes)
+    }
+
+    /// 读文件开头的若干行（不超过 maxBytes）
+    static func readLines(_ path: String, maxLines: Int, maxBytes: Int = 4 * 1024 * 1024) -> [Data] {
         guard let fh = FileHandle(forReadingAtPath: path) else { return [] }
         defer { try? fh.close() }
         var buffer = Data()
         var lines: [Data] = []
-        while lines.count < maxLines && buffer.count <= maxHeadBytes {
+        while lines.count < maxLines && buffer.count <= maxBytes {
             guard let chunk = try? fh.read(upToCount: 64 * 1024), !chunk.isEmpty else {
                 if !buffer.isEmpty { lines.append(buffer) }
                 break

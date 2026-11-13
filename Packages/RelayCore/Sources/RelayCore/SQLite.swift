@@ -6,7 +6,17 @@ final class SQLiteDatabase {
     private var handle: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-    init(path: String) throws {
+    /// - Parameter readOnly: 只读打开别人的数据库（例如 Codex 的项目表），不建文件、不改任何设置
+    init(path: String, readOnly: Bool = false) throws {
+        if readOnly {
+            guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+                let msg = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "未知错误"
+                sqlite3_close(handle)
+                throw RelayError(.internalError, "打不开数据库：\(msg)")
+            }
+            sqlite3_busy_timeout(handle, 2_000)
+            return
+        }
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
         // 先建好 0600 的空文件，避免数据库文件按默认权限创建
         if !FileManager.default.fileExists(atPath: path) {
