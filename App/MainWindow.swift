@@ -31,13 +31,19 @@ enum Page: String, CaseIterable, Identifiable {
 
 struct MainWindow: View {
     @Bindable var model: AppModel
-    @State private var page: Page = .overview
+    /// 选中值必须是可选类型，并且每行用 ForEach 生成、`.tag` 放在最后：
+    /// 用 `List(Page.allCases, selection:)` 加非可选选中值时，行的标记是 `Page.id`（文字），和选中值类型对不上，点了不切页
+    @State private var selection: Page? = .overview
+    private var page: Page { selection ?? .overview }
 
     var body: some View {
         NavigationSplitView {
-            List(Page.allCases, selection: $page) { p in
-                Label(p.title, systemImage: p.icon).tag(p)
-                    .badge(p == .overview ? model.attention.count : 0)
+            List(selection: $selection) {
+                ForEach(Page.allCases) { p in
+                    Label(p.title, systemImage: p.icon)
+                        .badge(p == .overview ? model.attention.count : 0)
+                        .tag(p)
+                }
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180)
         } detail: {

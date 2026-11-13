@@ -52,7 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model.runtime.stop()
-        AppLog.write("退出", paths: model.runtime.paths)
+        // 因为已有一份在运行而被拦下的这份从没启动过，日志里写明，免得和正在运行那份的“退出”混淆
+        AppLog.write(model.runtime.alreadyRunning ? "已有一份 AgentRelay 在用这个数据目录，这次打开的副本没有启动，直接退出" : "退出",
+                     paths: model.runtime.paths)
     }
 }
 
