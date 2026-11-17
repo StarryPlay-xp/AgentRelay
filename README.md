@@ -21,7 +21,12 @@ AgentRelay 是独立的开源项目，不是 Anthropic 或 OpenAI 的官方产�
 - 两边都装在全局：所有 Codex、Claude 会话（包括开在 Git 工作副本里的）都能看到这个工具，但只有你登记过的项目里的会话调用才会成功；代价是每个会话都多一份工具说明。
 - 撤回：在“接入”页点“卸载”；Codex 的配置装后没被别的程序改过时，会用备份逐字还原。要连应用一起卸掉，用“设置 › 完全卸载…”，它会先从两边移除，再删程序链接和运行文件，并问你要不要连数据库、备份和日志一起删。
 - 装好传话工具后，要**新开会话**才能用；已经开着的会话看不到新工具。
-- Codex 会话正在执行时，如果你按了停止，或者退出、重启了 ChatGPT，这个会话的传话队列会暂停，后面送来的信都排着不执行，要到那个会话里点“继续”。
+- 给 Codex 的信默认**排队**：对方这一轮结束后新开一轮处理。Codex 会话正在执行时，如果你按了停止，或者退出、重启了 ChatGPT，排着的信会暂停；但只停到下一次有任何一轮正常结束——你点“继续”，或者自己再发一条消息并等它回复完，排着的信就会自动接着执行。不想让它们执行，请在那个会话的界面上删掉这些排队消息。
+- 发信时也可以选**立即引导**（`relay_send` 的 `delivery="steer"`，只对 Codex 会话）：对方下一次开始新动作（执行命令、改文件、调用工具）之前会被拦下、先收到通知，正文由它自己用 `relay_inbox` 读取。它靠 Codex 官方的钩子实现，需要先在“接入”页装上钩子，再由你本人在 Codex 的“设置 › Hooks”里信任；AgentRelay 不会替你写信任记录。限制：
+  - 不会打断正在跑的命令、正在进行的那段思考或回复，最早在那条命令跑完、或对方准备下一步时送到；
+  - 对方空闲时直接报错，不会悄悄改为排队，除非发信时明确加 `steer_fallback="queue"`（回执会写明实际用了排队）；
+  - 这一轮被你停止、或 10 分钟内没能送进去，信标为投递失败；
+  - 送进去不等于对方照做：引导信仍是其他会话的协作信息，不是你的指示。
 
 ## 参与开发
 
@@ -56,7 +61,7 @@ swift build
 swift test
 ```
 
-- 先 `swift build` 再 `swift test`：集成测试会起真实的 `relayd`、`relay-mcp`、`relay-wait` 进程，全部在临时目录里跑，codex 用假脚本，不会碰到你真实的 Codex、Claude 会话。
+- 先 `swift build` 再 `swift test`：集成测试会起真实的 `relayd`、`relay-mcp`、`relay-wait`、`relay-hook` 进程，全部在临时目录里跑，codex 用假脚本，不会碰到你真实的 Codex、Claude 会话。
 - 测试只用合成数据，会话编号用固定示例 `00000000-0000-4000-8000-0000000000NN`。
 - 接入向导的默认测试用模拟两边行为的假命令。要用真的 codex、claude 走一遍接入、核对、卸载，手动开启下面这项（需要装有 ChatGPT 桌面版和命令行 `claude`）。它把 `CODEX_HOME`、`CLAUDE_CONFIG_DIR` 指向临时目录，跑完核对你真实的配置没被改动：
 
@@ -66,7 +71,7 @@ AGENTRELAY_REAL_CLI_TEST=1 swift test --filter SetupTests
 
 ### 构建和运行桌面应用
 
-桌面应用在 `App/`，工程是 `AgentRelay.xcodeproj`（需要 Xcode 16 以上，macOS 14 以上）。中转核心在应用里运行，菜单栏常驻；`relay-mcp`、`relay-wait` 两个命令行程序打进应用包的 `Contents/Helpers/`，应用启动时在数据目录的 `bin/` 下建指向它们的符号链接。
+桌面应用在 `App/`，工程是 `AgentRelay.xcodeproj`（需要 Xcode 16 以上，macOS 14 以上）。中转核心在应用里运行，菜单栏常驻；`relay-mcp`、`relay-wait`、`relay-hook` 三个命令行程序打进应用包的 `Contents/Helpers/`，应用启动时在数据目录的 `bin/` 下建指向它们的符号链接。
 
 - **在 Xcode 里运行**：打开工程，选 `AgentRelay` 方案，点运行。共享的构建方案已带启动参数 `-AgentRelayHome ~/.agentrelay-dev`，开发数据和以后正式用的 `~/.agentrelay` 分开；菜单栏面板会显示“开发数据目录”。
 - **命令行构建**（产物在 `build/`，不进仓库）：
@@ -101,6 +106,7 @@ claude mcp add --scope user agent-relay -e AGENTRELAY_HOME=<数据目录> -- <�
 
 - 改 `~/.codex/config.toml`、`~/.claude.json` 之前先备份；用完用 `codex mcp remove agent-relay`、`claude mcp remove --scope user agent-relay` 卸载。
 - 装好后要新开会话才能用。Claude 会话登记后，按返回结果在后台运行等信命令。
+- 立即引导的钩子一般也用“接入”页装（可以只装到一个测试项目文件夹）。手动装时，在 `~/.codex/hooks.json`（或 `<项目>/.codex/hooks.json`）的 `hooks` 里给 `UserPromptSubmit`、`PreToolUse`、`PostToolUse`、`Stop`、`Interrupt` 各加一条 `{"type": "command", "command": "<数据目录>/bin/relay-hook --home <数据目录>", "timeout": 10}`（`PreToolUse`、`PostToolUse` 那组带 `"matcher": "*"`；默认数据目录时不带 `--home`），再到 Codex 的“设置 › Hooks”里信任它们。
 
 ### 开发用中转进程 relayd
 
@@ -122,9 +128,9 @@ claude mcp add --scope user agent-relay -e AGENTRELAY_HOME=<数据目录> -- <�
 }
 ```
 
-- relayd 不建链接：`<数据目录>/bin/` 下要自己放两个符号链接 `relay-mcp`、`relay-wait`，指向包的构建产物。接入两边的命令见上一节。
+- relayd 不建链接：`<数据目录>/bin/` 下要自己放三个符号链接 `relay-mcp`、`relay-wait`、`relay-hook`，指向包的构建产物。接入两边的命令见上一节。
 - 控制台命令：`status`、`sessions`、`messages`、`events`、`pause`、`resume`、`handoff <信箱名>`（确认交接）、`reload`、`quit`。
-- 默认按正式模式核对对端：relay-mcp 必须由带厂商签名的 Codex 或 Claude Code 拉起。`--dev-relax-peer-check` 只供测试；`--codex <路径>` 固定使用某个 codex 程序。
+- 默认按正式模式核对对端：relay-mcp 必须由带厂商签名的 Codex 或 Claude Code 拉起；relay-hook 往上几层里必须有带签名的 Codex，而且只能上报钩子事件。`--dev-relax-peer-check` 只供测试；`--codex <路径>` 固定使用某个 codex 程序。
 - 同一个数据目录同时只能运行桌面应用和 relayd 中的一个。
 
 ## 隐私约定
