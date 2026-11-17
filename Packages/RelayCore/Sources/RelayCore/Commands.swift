@@ -78,14 +78,15 @@ public struct SystemCommandRunner: CommandRunning {
     }
 }
 
-/// 在后台读完子进程输出，避免输出太多时子进程卡住
+/// 在后台读完子进程输出，避免输出太多时子进程卡住。
+/// 用独立线程读：读可能阻塞很久，放在 GCD 全局队列上，调用方又在同步等它时，线程池被占满就会互相卡住
 final class OutputCollector: @unchecked Sendable {
     private var data = Data()
     private let lock = NSLock()
     private let finished = DispatchSemaphore(value: 0)
 
     init(_ handle: FileHandle) {
-        DispatchQueue.global().async { [self] in
+        Thread.detachNewThread { [self] in
             let d = handle.readDataToEndOfFile()
             lock.lock()
             data = d

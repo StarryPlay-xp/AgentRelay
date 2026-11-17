@@ -60,7 +60,6 @@ public final class SocketServer: @unchecked Sendable {
     private let policy: PeerPolicy
     private let handler: Handler
     private let onReject: @Sendable (String) -> Void
-    private let queue = DispatchQueue(label: "agentrelay.socket", attributes: .concurrent)
     private var listenFD: Int32 = -1
     private var token = ""
     private let lock = NSLock()
@@ -136,7 +135,8 @@ public final class SocketServer: @unchecked Sendable {
                 if !isRunning { return }
                 continue
             }
-            queue.async { [self] in serve(client) }
+            // 每个连接一个独立线程：处理中会同步等待（例如运行 codex queue），不占 GCD 全局线程池
+            Thread.detachNewThread { [self] in serve(client) }
         }
     }
 
