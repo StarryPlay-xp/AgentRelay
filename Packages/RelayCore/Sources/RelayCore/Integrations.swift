@@ -42,10 +42,14 @@ extension Store {
         try locked { try configChangeRows("ORDER BY id DESC LIMIT ?", [.int(limit)]) }
     }
 
-    /// 某个平台最近一次成功的安装
-    public func lastInstall(platform: Platform) throws -> ConfigChangeRow? {
+    /// 某个平台最近一次成功的安装；给出 `target` 时只看改这个文件的（Codex 的 config.toml 和 hooks.json 分开算）
+    public func lastInstall(platform: Platform, target: String? = nil) throws -> ConfigChangeRow? {
         try locked {
-            try configChangeRows("WHERE platform = ? AND action = 'install' AND ok = 1 ORDER BY id DESC LIMIT 1", [.text(platform.rawValue)]).first
+            if let target {
+                return try configChangeRows("WHERE platform = ? AND target = ? AND action = 'install' AND ok = 1 ORDER BY id DESC LIMIT 1",
+                                            [.text(platform.rawValue), .text(target)]).first
+            }
+            return try configChangeRows("WHERE platform = ? AND action = 'install' AND ok = 1 ORDER BY id DESC LIMIT 1", [.text(platform.rawValue)]).first
         }
     }
 
@@ -323,11 +327,14 @@ public final class Integrations: @unchecked Sendable {
 
     /// 把配置文件复制进备份目录（0600）；文件不存在时返回 nil
     private func backup(_ p: Platform, label: String) throws -> String? {
-        let file = configFile(p)
+        try backup(file: configFile(p), name: p == .codex ? "codex-config.toml" : "claude.json", label: label)
+    }
+
+    /// 把任意一个配置文件复制进备份目录（0600），备份名是 `<name>.<时间>-<随机数>.<label>`；文件不存在时返回 nil
+    func backup(file: String, name: String, label: String) throws -> String? {
         guard let data = FileManager.default.contents(atPath: file) else { return nil }
         try FileSystem.makeDirectory(paths.backups, mode: 0o700)
-        let name = (p == .codex ? "codex-config.toml" : "claude.json") + ".\(Self.stampFormatter.string(from: clock()))-\(UInt16.random(in: 0...UInt16.max)).\(label)"
-        let path = paths.backups + "/" + name
+        let path = paths.backups + "/" + name + ".\(Self.stampFormatter.string(from: clock()))-\(UInt16.random(in: 0...UInt16.max)).\(label)"
         try FileSystem.writeAtomically(data, to: path)
         return path
     }
@@ -501,7 +508,7 @@ public final class Integrations: @unchecked Sendable {
     /// 不满足条件时返回 nil，交给官方命令移除
     private func restoreCodexIfUntouched() -> IntegrationReport? {
         let file = configFile(.codex)
-        guard let last = try? store.lastInstall(platform: .codex), let snapshotPath = last.snapshotPath,
+        guard let last = try? store.lastInstall(platform: .codex, target: file), let snapshotPath = last.snapshotPath,
               let snapshot = FileManager.default.contents(atPath: snapshotPath),
               let current = FileManager.default.contents(atPath: file), current == snapshot else { return nil }
         do {
@@ -539,9 +546,16 @@ public struct UninstallStep: Sendable, Equatable {
 }
 
 public enum FullUninstall {
-    /// 第一阶段（应用还在运行时）：从两边移除传话工具。哪边失败就停下，不做后面的删除
+    /// 第一阶段（应用还在运行时）：先移除 Codex 钩子（全局和装过的项目文件夹），再从两边移除传话工具。
+    /// 哪一步失败就停下，不做后面的删除
     public static func removeIntegrations(_ integrations: Integrations) -> [UninstallStep] {
         var steps: [UninstallStep] = []
+        for scope in [HookScope.global] + integrations.projectHookScopes() {
+            if case .notInstalled = integrations.hookStatus(scope).state { continue }
+            let r = integrations.uninstallHooks(scope)
+            steps.append(UninstallStep(title: "移除 Codex 钩子（\(integrations.hooksFile(scope))）", ok: r.ok, detail: r.lines.joined(separator: "\n")))
+            if !r.ok { return steps }
+        }
         for p in [Platform.codex, .claude] {
             let r = integrations.uninstall(p)
             steps.append(UninstallStep(title: "从 \(p.displayName) 移除传话工具", ok: r.ok, detail: r.lines.joined(separator: "\n")))

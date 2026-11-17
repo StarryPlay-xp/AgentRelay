@@ -338,7 +338,7 @@ struct MessageStatusLabel: View {
     private var color: Color {
         switch message.status {
         case .failed: return Palette.bad
-        case .retrying: return Palette.warn
+        case .retrying, .unknown: return Palette.warn
         default: return Palette.ink2
         }
     }

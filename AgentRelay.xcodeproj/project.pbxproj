@@ -12,6 +12,8 @@
 		AA0000000000000000000052 /* RelayCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000063 /* RelayCore */; };
 		AA0000000000000000000053 /* relay-mcp in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000021 /* relay-mcp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AA0000000000000000000054 /* relay-wait in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* relay-wait */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AA0000000000000000000055 /* relay-hook in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000023 /* relay-hook */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AA0000000000000000000056 /* RelayCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000064 /* RelayCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,6 +31,13 @@
 			remoteGlobalIDString = AA0000000000000000000032;
 			remoteInfo = RelayWaitHelper;
 		};
+		AA0000000000000000000074 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000033;
+			remoteInfo = RelayHookHelper;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -40,6 +49,7 @@
 			files = (
 				AA0000000000000000000053 /* relay-mcp in Embed Helpers */,
 				AA0000000000000000000054 /* relay-wait in Embed Helpers */,
+				AA0000000000000000000055 /* relay-hook in Embed Helpers */,
 			);
 			name = "Embed Helpers";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -52,6 +62,7 @@
 		AA0000000000000000000020 /* AgentRelay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentRelay.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000021 /* relay-mcp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "relay-mcp"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000022 /* relay-wait */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "relay-wait"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000023 /* relay-hook */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "relay-hook"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -68,6 +79,11 @@
 		AA0000000000000000000012 /* relay-wait */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "relay-wait";
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000014 /* relay-hook */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "relay-hook";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -97,6 +113,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000049 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA0000000000000000000056 /* RelayCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -116,6 +140,7 @@
 				AA0000000000000000000020 /* AgentRelay.app */,
 				AA0000000000000000000021 /* relay-mcp */,
 				AA0000000000000000000022 /* relay-wait */,
+				AA0000000000000000000023 /* relay-hook */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -134,6 +159,7 @@
 			children = (
 				AA0000000000000000000011 /* relay-mcp */,
 				AA0000000000000000000012 /* relay-wait */,
+				AA0000000000000000000014 /* relay-hook */,
 			);
 			path = Tools;
 			sourceTree = "<group>";
@@ -155,6 +181,7 @@
 			dependencies = (
 				AA0000000000000000000072 /* PBXTargetDependency */,
 				AA0000000000000000000073 /* PBXTargetDependency */,
+				AA0000000000000000000075 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				AA0000000000000000000010 /* App */,
@@ -211,6 +238,28 @@
 			productReference = AA0000000000000000000022 /* relay-wait */;
 			productType = "com.apple.product-type.tool";
 		};
+		AA0000000000000000000033 /* RelayHookHelper */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000084 /* Build configuration list for PBXNativeTarget "RelayHookHelper" */;
+			buildPhases = (
+				AA0000000000000000000048 /* Sources */,
+				AA0000000000000000000049 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000014 /* relay-hook */,
+			);
+			name = RelayHookHelper;
+			packageProductDependencies = (
+				AA0000000000000000000064 /* RelayCore */,
+			);
+			productName = "relay-hook";
+			productReference = AA0000000000000000000023 /* relay-hook */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -241,6 +290,7 @@
 				AA0000000000000000000030 /* AgentRelay */,
 				AA0000000000000000000031 /* RelayMCPHelper */,
 				AA0000000000000000000032 /* RelayWaitHelper */,
+				AA0000000000000000000033 /* RelayHookHelper */,
 			);
 		};
 /* End PBXProject section */
@@ -277,6 +327,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000048 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -289,6 +346,11 @@
 			isa = PBXTargetDependency;
 			target = AA0000000000000000000032 /* RelayWaitHelper */;
 			targetProxy = AA0000000000000000000071 /* PBXContainerItemProxy */;
+		};
+		AA0000000000000000000075 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000033 /* RelayHookHelper */;
+			targetProxy = AA0000000000000000000074 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -406,6 +468,26 @@
 			};
 			name = Release;
 		};
+		AA0000000000000000000098 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-hook";
+				PRODUCT_MODULE_NAME = RelayHookHelper;
+				PRODUCT_NAME = "relay-hook";
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		AA0000000000000000000099 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = "$(AGENTRELAY_BUNDLE_PREFIX).relay-hook";
+				PRODUCT_MODULE_NAME = RelayHookHelper;
+				PRODUCT_NAME = "relay-hook";
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -445,6 +527,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		AA0000000000000000000084 /* Build configuration list for PBXNativeTarget "RelayHookHelper" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000098 /* Debug */,
+				AA0000000000000000000099 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -466,6 +557,11 @@
 			productName = RelayMCP;
 		};
 		AA0000000000000000000063 /* RelayCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */;
+			productName = RelayCore;
+		};
+		AA0000000000000000000064 /* RelayCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = AA0000000000000000000060 /* XCLocalSwiftPackageReference "Packages/RelayCore" */;
 			productName = RelayCore;

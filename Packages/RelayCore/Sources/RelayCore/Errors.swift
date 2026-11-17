@@ -15,6 +15,10 @@ public enum RelayErrorCode: String, Codable, Sendable, CaseIterable {
     case bodyTooLong = "BODY_TOO_LONG"
     case secretSuspected = "SECRET_SUSPECTED"
     case deliveryFailed = "DELIVERY_FAILED"
+    /// 立即引导：对方现在没有正在进行的一轮（空闲，或者 Codex 后台服务重启过）
+    case steerNoActiveTurn = "STEER_NO_ACTIVE_TURN"
+    /// 立即引导：对方用不了（Claude 会话，或者对方会话的钩子没装、没被信任）
+    case steerUnavailable = "STEER_UNAVAILABLE"
     /// 参数不对（信箱名不合规、缺少必填参数、回信对象不对等）
     case invalidArgument = "INVALID_ARGUMENT"
     /// 本机通话口版本不一致

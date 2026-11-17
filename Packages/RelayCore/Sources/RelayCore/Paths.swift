@@ -31,6 +31,9 @@ public struct RelayPaths: Sendable, Equatable {
     public func mailboxMarker(_ name: String) -> String { mailbox(name) + "/new" }
     /// 信箱主人标记，内容是当前主人的短码（没有主人时是 `-`）；等信命令据此判断自己还该不该等
     public func mailboxOwner(_ name: String) -> String { mailbox(name) + "/owner" }
+    /// 登记在用的 Codex 会话的标记目录：relay-hook 看到标记才连中转核心，其余会话直接放行
+    public var hookSessions: String { run + "/hook-sessions" }
+    public func hookSessionMarker(_ sessionID: String) -> String { hookSessions + "/" + sessionID.lowercased() }
 
     /// 套接字路径的上限：`sockaddr_un.sun_path` 是 104 字节，含结尾的 0。
     public static let maxSocketPathBytes = 103

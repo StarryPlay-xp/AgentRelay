@@ -22,6 +22,8 @@ public final class RelayService: @unchecked Sendable {
     let mailbox: ClaudeMailbox
     let waits: WaitDetecting
     private let appServerPID: @Sendable () -> pid_t?
+    /// 钩子上报时记下的 Codex 后台服务还在不在（它退出了，记下的轮次状态就作废）
+    private let hostAlive: @Sendable (pid_t) -> Bool
     let clock: @Sendable () -> Date
     private let notify: @Sendable (Notice) -> Void
     /// 有新会话想接手信箱时，告诉用户去哪里确认（应用里是概览页，开发用的 relayd 是控制台命令）
@@ -37,6 +39,7 @@ public final class RelayService: @unchecked Sendable {
     public init(paths: RelayPaths, store: Store, registry: RegistrySource, resolver: IdentityResolver,
                 limits: @escaping @Sendable () -> Limits = { Limits() }, dispatcher: CodexDispatcher, waits: WaitDetecting = ProcessWaitDetector(),
                 appServerPID: @escaping @Sendable () -> pid_t? = { CodexAppServer.running()?.pid },
+                hostAlive: @escaping @Sendable (pid_t) -> Bool = { CodexAppServer.isAlive(pid: $0) },
                 clock: @escaping @Sendable () -> Date = { Date() },
                 handoffHint: @escaping @Sendable (String) -> String = { _ in "请在 AgentRelay 主窗口的概览里确认或拒绝。" },
                 notify: @escaping @Sendable (Notice) -> Void) {
@@ -49,6 +52,7 @@ public final class RelayService: @unchecked Sendable {
         self.mailbox = ClaudeMailbox(paths: paths)
         self.waits = waits
         self.appServerPID = appServerPID
+        self.hostAlive = hostAlive
         self.clock = clock
         self.handoffHint = handoffHint
         self.notify = notify
@@ -56,19 +60,37 @@ public final class RelayService: @unchecked Sendable {
 
     // MARK: 入口
 
+    /// 本机通话口的入口：带着核对过的对端信息
+    public func handle(_ request: WireRequest, peer: VerifiedPeer) -> WireResponse {
+        respond { request.op == .hook ? try hook(request, peer) : try dispatch(request, peer.platform) }
+    }
+
+    /// 测试和旧调用方用：只给平台（放宽检查时为 nil）
     public func handle(_ request: WireRequest, peerPlatform: Platform?) -> WireResponse {
+        respond {
+            request.op == .hook ? try hook(request, VerifiedPeer(platform: peerPlatform, program: nil, hostPID: nil))
+                                : try dispatch(request, peerPlatform)
+        }
+    }
+
+    private func respond(_ body: () throws -> WireResult) -> WireResponse {
         do {
-            switch request.op {
-            case .register: return .success(try register(request, peerPlatform))
-            case .contacts: return .success(try contacts(request, peerPlatform))
-            case .send: return .success(try send(request, peerPlatform))
-            case .inbox: return .success(try inbox(request, peerPlatform))
-            case .status: return .success(try status(request, peerPlatform))
-            }
+            return .success(try body())
         } catch let e as RelayError {
             return .failure(e)
         } catch {
             return .failure(RelayError(.internalError, "\(error)"))
+        }
+    }
+
+    private func dispatch(_ request: WireRequest, _ peerPlatform: Platform?) throws -> WireResult {
+        switch request.op {
+        case .register: return try register(request, peerPlatform)
+        case .contacts: return try contacts(request, peerPlatform)
+        case .send: return try send(request, peerPlatform)
+        case .inbox: return try inbox(request, peerPlatform)
+        case .status: return try status(request, peerPlatform)
+        case .hook: return try hook(request, VerifiedPeer(platform: peerPlatform, program: nil, hostPID: nil))
         }
     }
 
@@ -108,6 +130,23 @@ public final class RelayService: @unchecked Sendable {
         let owners = Dictionary(active.map { ($0.mailbox, MailboxOwner.token(for: $0)) }, uniquingKeysWith: { a, _ in a })
         for name in Set(mailbox.mailboxNames()).union(owners.keys) {
             try? mailbox.setOwner(owners[name], mailbox: name)
+        }
+        writeHookSessionMarkers()
+    }
+
+    /// relay-hook 的快速放行标记：`run/hook-sessions/<会话编号>`，只给在用的 Codex 会话建。
+    /// 没有标记的会话（没登记的、桌面端的后台临时会话）relay-hook 不连中转核心，直接放行。
+    func writeHookSessionMarkers() {
+        let active = Set(((try? store.sessions(status: .active)) ?? []).filter { $0.platform == .codex }.map { $0.sessionID.lowercased() })
+        let dir = paths.hookSessions
+        let existing = Set((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+        if active.isEmpty && existing.isEmpty { return }
+        try? FileSystem.makeDirectory(dir, mode: 0o700)
+        for id in active.subtracting(existing) where SessionRecordLocator.isValidSessionID(id) {
+            try? FileSystem.writeAtomically(Data(), to: paths.hookSessionMarker(id))
+        }
+        for name in existing.subtracting(active) where !name.hasPrefix(".") {
+            unlink(dir + "/" + name)
         }
     }
 
@@ -280,8 +319,11 @@ public final class RelayService: @unchecked Sendable {
             throw RelayError(.secretSuspected, "正文里疑似有\(secrets.joined(separator: "、"))，已拒绝发送。不要在信里写密码、令牌、私钥等")
         }
         let needsReply = req.args.needsReply ?? true
+        let requested = req.args.delivery ?? .queue
+        let fallback = req.args.steerFallback ?? .none
 
-        let (message, recipient, long) = try locked { () -> (MessageRow, SessionRow, Bool) in
+        // 立即引导能不能送进去，要和钩子上报的轮次状态一起判断，所以放在同一把锁里（结束钩子放行和发信不会交错）
+        let (message, recipient, long, steerSkipped) = try locked { () -> (MessageRow, SessionRow, Bool, RelayError?) in
             guard let recipient = try store.activeSession(mailbox: to) else {
                 throw RelayError(.recipientNotFound, "没有叫 \(to) 的信箱（或对方还没登记），可以先调用 relay_contacts 看看能发给谁")
             }
@@ -316,28 +358,53 @@ public final class RelayService: @unchecked Sendable {
                 alert("超限", "一小时内全部传话已达 \(limits.totalPerHour) 封，新信被拒绝")
                 throw RelayError(.rateLimit, "一小时内全部传话已经达到 \(limits.totalPerHour) 封上限，请稍后再发")
             }
-            let long = recipient.platform == .codex && body.count > limits.codexInlineMaxCharacters
-            let status: MessageStatus = (recipient.platform == .claude || long) ? .pending : .retrying
+
+            // 立即引导送不进去：默认直接报错（不排队）；发信方明确要求 steer_fallback=queue 时才改为排队
+            var steerSkipped: RelayError?
+            var steer = requested == .steer
+            if steer, let blocker = try steerBlocker(recipient) {
+                guard fallback == .queue else { throw blocker }
+                steerSkipped = blocker
+                steer = false
+            }
+            let long = !steer && recipient.platform == .codex && body.count > limits.codexInlineMaxCharacters
+            let status: MessageStatus = steer ? .steerWaiting : (recipient.platform == .claude || long) ? .pending : .retrying
             let m = try store.insertMessage(MessageDraft(chainID: chain, hop: hop, from: me, to: recipient, replyTo: req.args.replyTo,
                                                          subject: subject, body: body, needsReply: needsReply, status: status,
-                                                         createdAt: now))
+                                                         createdAt: now, requestedDelivery: requested,
+                                                         actualDelivery: recipient.platform == .claude ? .queue : nil))
             if let parentID = req.args.replyTo, !parentID.isEmpty { try store.markReplied(id: parentID, at: now) }
-            try store.addEvent(kind: "发信", summary: "\(m.id)：\(me.mailbox) → \(to)（来回链 \(m.chainID) 第 \(m.hop) 次）", at: now)
-            return (m, recipient, long)
+            let how = steer ? "，立即引导" : steerSkipped != nil ? "，要求立即引导、改为排队" : ""
+            try store.addEvent(kind: "发信", summary: "\(m.id)：\(me.mailbox) → \(to)（来回链 \(m.chainID) 第 \(m.hop) 次\(how)）", at: now)
+            return (m, recipient, long, steerSkipped)
         }
 
         var result = WireResult(text: "")
         result.messageID = message.id
         result.chainID = message.chainID
         result.hop = message.hop
+        result.requestedDelivery = requested
         let head = "信件 \(message.id)（来回链 \(message.chainID) 第 \(message.hop)/\(limits.hopLimit) 次）"
+        // 原因以信箱名开头时（例如“codex-a 现在没有……”）和前面的中文之间空一格
+        let fellBack = steerSkipped.map { e -> String in
+            let why = e.message.prefix(while: { $0 != "。" })
+            return "要求立即引导，但" + (why.first?.isASCII == true ? " " : "") + why + "；按 steer_fallback=\"queue\" 改为排队。"
+        } ?? ""
+
+        if message.status == .steerWaiting {
+            result.delivery = .steerWaiting
+            result.text = "\(head)已交给 \(to)，方式：立即引导，正在等注入。对方正在一轮里：它下一次开始新动作（执行命令、改文件、调用工具）之前会被拦下、先收到这封信的通知；正在跑的命令要等跑完才送到；如果它不再动作，会在这一轮结束前送到。正文由对方调用 relay_inbox 读取。注入后用 relay_status 可以看到注入到哪一轮；对方读信后显示“对方已读”。这一轮被用户停止、或 \(Int(Self.steerWaitTimeout / 60)) 分钟内没能注入时，信会标为投递失败，不会自动改为排队。"
+            result.text += Self.afterSendAdvice(sender: me.platform, needsReply: needsReply)
+            return result
+        }
 
         switch recipient.platform {
         case .claude:
             try mailbox.setUnread(try store.unreadCount(toSession: recipient.id), mailbox: recipient.mailbox)
             result.delivery = .pending
+            result.actualDelivery = .queue
             let waiting = isWaiting(recipient)
-            result.text = "\(head)已放进 \(to) 的信箱。" + (waiting
+            result.text = fellBack + "\(head)已放进 \(to) 的信箱。" + (waiting
                 ? "对方正在等信，会马上被叫醒。"
                 : "对方现在没在等信，信会留在信箱里；\(Int(limits.claudeUnreadNotifyAfter / 60)) 分钟后还没读，会提醒用户。")
         case .codex:
@@ -349,17 +416,44 @@ public final class RelayService: @unchecked Sendable {
             switch outcome {
             case .queued:
                 result.delivery = long ? .pending : .queued
-                result.text = "\(head)已排进 \(to) 的 Codex 队列" + (long ? "（长信，对方会收到通知后用 relay_inbox 读全文）" : "")
-                    + "。对方空闲时大约 10～20 秒后开始处理，正忙时排在后面。"
+                result.actualDelivery = .queue
+                result.text = fellBack + "\(head)已排进 \(to) 的 Codex 队列" + (long ? "（长信，对方会收到通知后用 relay_inbox 读全文）" : "")
+                    + "。对方空闲时大约 10～20 秒后开始处理，正忙时排在这一轮后面。"
             case .failed:
                 result.delivery = .retrying
-                result.text = "\(head)这次没排进 \(to) 的队列，正在自动重试；可以稍后用 relay_status 查看投递状态。"
+                result.text = fellBack + "\(head)这次没排进 \(to) 的队列，正在自动重试；可以稍后用 relay_status 查看投递状态。"
+            case .unknown(let why):
+                result.delivery = .unknown
+                result.text = fellBack + "\(head)投递结果未知（\(why)）：可能已经排进 \(to) 的队列，也可能没有。为避免对方收到两遍，没有自动重试，已通知用户。"
             case .unavailable(let why):
                 throw RelayError(.deliveryFailed, "信没送出去：\(why)。已通知用户")
             }
         }
         result.text += Self.afterSendAdvice(sender: me.platform, needsReply: needsReply)
         return result
+    }
+
+    /// 等注入的引导信最多等多久（对方在跑很长的命令、或者 Codex 卡住）
+    static let steerWaitTimeout: TimeInterval = 600
+    /// 同一轮里最多注入几封引导信，防止来回停不下来
+    static let steerPerTurn = 3
+
+    /// 立即引导现在送不送得进去：送得进去返回 nil，否则返回原因（调用方已持有 lock）
+    private func steerBlocker(_ recipient: SessionRow) throws -> RelayError? {
+        let to = recipient.mailbox
+        guard recipient.platform == .codex else {
+            return RelayError(.steerUnavailable, "\(to) 是 Claude 会话，立即引导目前只支持 Codex 会话。可以改用 delivery=\"queue\"，或者加 steer_fallback=\"queue\"")
+        }
+        guard let turn = try store.codexTurn(sessionID: recipient.sessionID) else {
+            return RelayError(.steerUnavailable, "还没收到过 \(to) 的钩子上报：可能没装或还没在 Codex 里信任 AgentRelay 的钩子，也可能对方会话还没做过任何动作。可以改用 delivery=\"queue\"，或者加 steer_fallback=\"queue\"")
+        }
+        if let pid = turn.hostPID, !hostAlive(pid) {
+            return RelayError(.steerNoActiveTurn, "\(to) 所在的 Codex 后台服务退出或重启过，现在不知道它是否正在一轮里，立即引导送不进去。可以改用 delivery=\"queue\"，或者加 steer_fallback=\"queue\"")
+        }
+        guard turn.active else {
+            return RelayError(.steerNoActiveTurn, "\(to) 现在没有正在进行的一轮（空闲），立即引导送不进去。可以改用 delivery=\"queue\"，或者加 steer_fallback=\"queue\"")
+        }
+        return nil
     }
 
     /// 发信后提醒发信方怎么等回信。Codex 只在一轮结束后才处理排队的消息，
@@ -381,7 +475,7 @@ public final class RelayService: @unchecked Sendable {
         let now = clock()
         switch outcome {
         case .queued(let ref):
-            try? store.updateDelivery(id: id, status: long ? .pending : .queued, queueRef: ref, at: now)
+            try? store.updateDelivery(id: id, status: long ? .pending : .queued, queueRef: ref, actual: .queue, at: now)
         case .failed(let why):
             if final {
                 try? store.updateDelivery(id: id, status: .failed, error: why, at: now)
@@ -389,9 +483,119 @@ public final class RelayService: @unchecked Sendable {
             } else {
                 try? store.updateDelivery(id: id, status: .retrying, error: why, at: now)
             }
+        case .unknown(let why):
+            try? store.updateDelivery(id: id, status: .unknown, error: why, at: now)
+            alert("结果未知", "\(id) 投递给 \(to) 的结果未知：\(why)。可能已经排进对方的队列，也可能没有；为避免重复，没有自动重试。请到那个会话看看有没有收到")
         case .unavailable(let why):
             try? store.updateDelivery(id: id, status: .failed, error: why, at: now)
             alert("投递失败", "\(id) 投递给 \(to) 失败：\(why)")
+        }
+    }
+
+    // MARK: Codex 钩子（relay-hook）
+
+    /// AgentRelay 自己的工具：命令执行前钩子不拦它们，否则对方没法读信
+    static let relayToolNames = ["relay_register", "relay_contacts", "relay_send", "relay_inbox", "relay_status"]
+
+    static func isRelayTool(_ name: String) -> Bool {
+        relayToolNames.contains { name == $0 || (name.hasPrefix("mcp__") && name.hasSuffix("__" + $0)) }
+    }
+
+    /// relay-hook 上报一次 Codex 钩子事件：记轮次状态，有等注入的引导信就认领，返回要打印给 Codex 的输出。
+    /// 没登记的会话直接放行；任何情况下都不返回发信方写的正文，只给固定的通知（正文由 relay_inbox 读取）。
+    private func hook(_ req: WireRequest, _ peer: VerifiedPeer) throws -> WireResult {
+        guard let ev = req.args.hook, SessionRecordLocator.isValidSessionID(ev.sessionID) else {
+            throw RelayError(.invalidArgument, "钩子事件不完整")
+        }
+        if let p = peer.platform, p != .codex { throw RelayError(.identityMismatch, "只接受 Codex 的钩子") }
+        let now = clock()
+        return try locked {
+            var r = WireResult(text: "放行")
+            guard let s = try store.session(platform: .codex, sessionID: ev.sessionID.lowercased()), s.status == .active else {
+                return r
+            }
+            func setTurn(_ active: Bool) throws {
+                try store.setCodexTurn(sessionID: s.sessionID, turnID: ev.turnID, active: active, hostPID: peer.hostPID, at: now)
+            }
+            switch ev.event {
+            case "UserPromptSubmit":
+                try setTurn(true)
+            case "PreToolUse", "PostToolUse":
+                try setTurn(true)
+                if ev.event == "PreToolUse", Self.isRelayTool(ev.toolName ?? "") { break }
+                let claimed = try claimSteer(for: s, ev, now)
+                if !claimed.isEmpty { r.hookOutput = hookOutput(ev.event, claimed); r.text = "注入" }
+            case "Stop":
+                let claimed = try claimSteer(for: s, ev, now)
+                if claimed.isEmpty {
+                    // 这一轮要结束了：还在等的（超过每轮上限的）引导信不再送，标投递失败
+                    try setTurn(false)
+                    let left = try store.steerWaiting(toSession: s.id)
+                    if !left.isEmpty {
+                        let failed = try store.failSteerWaiting(left.map(\.id), reason: "这一轮已注入 \(Self.steerPerTurn) 封引导信，到上限，没有送进去（不转排队）", at: now)
+                        for m in failed { alert("引导未送达", "\(m.id)（\(m.fromMailbox) → \(m.toMailbox)）没有送进去：对方这一轮已注入 \(Self.steerPerTurn) 封，到上限") }
+                    }
+                } else {
+                    try setTurn(true)
+                    r.hookOutput = hookOutput("Stop", claimed)
+                    r.text = "注入"
+                }
+            case "Interrupt":
+                try setTurn(false)
+                let left = try store.steerWaiting(toSession: s.id)
+                let failed = try store.failSteerWaiting(left.map(\.id), reason: "对方这一轮被用户停止，引导信没有送进去（不转排队）", at: now)
+                for m in failed { alert("引导未送达", "\(m.id)（\(m.fromMailbox) → \(m.toMailbox)）没有送进去：对方这一轮被用户停止。没有自动改为排队") }
+            default:
+                break
+            }
+            return r
+        }
+    }
+
+    /// 认领等注入的引导信（每轮最多 `steerPerTurn` 封），调用方已持有 lock
+    private func claimSteer(for s: SessionRow, _ ev: HookEvent, _ now: Date) throws -> [MessageRow] {
+        let waiting = try store.steerWaiting(toSession: s.id)
+        guard !waiting.isEmpty else { return [] }
+        let used = try ev.turnID.map { try store.injectedCount(toSession: s.id, turnID: $0) } ?? 0
+        let room = max(0, Self.steerPerTurn - used)
+        guard room > 0 else { return [] }
+        let claimed = try store.claimSteer(waiting.prefix(room).map(\.id), turnID: ev.turnID, event: ev.event, at: now)
+        for m in claimed {
+            try store.addEvent(kind: "引导", summary: "\(m.id)：\(m.fromMailbox) → \(m.toMailbox) 已注入对方正在进行的一轮（\(ev.event)）", at: now)
+        }
+        return claimed
+    }
+
+    /// 给 Codex 的钩子输出。只放应用生成的固定通知和信封第一行，不放发信方写的正文
+    func hookOutput(_ event: String, _ letters: [MessageRow]) -> String {
+        let notices = letters.map { m in
+            envelope(m).headline + "\n这是一封立即引导信（发信方要求尽快送到）。请先调用 relay_inbox 读取正文，再决定接下来怎么做。"
+        }.joined(separator: "\n\n")
+        let obj: [String: Any]
+        switch event {
+        case "PreToolUse":
+            let reason = "AgentRelay 拦下了刚才这一步，它没有执行：有其他会话发来的引导信。\n\n" + notices
+                + "\n\n读完信后如果仍然需要，可以重新执行刚才这一步。"
+            obj = ["hookSpecificOutput": ["hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason]]
+        case "PostToolUse":
+            obj = ["hookSpecificOutput": ["hookEventName": "PostToolUse", "additionalContext": notices]]
+        default:
+            obj = ["decision": "block", "reason": notices]
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes])) ?? Data("{}".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// 回执里的投递方式说明，例如“立即引导，已注入第 … 轮（PreToolUse）”“要求立即引导，实际排队”
+    public static func deliveryReceipt(_ m: MessageRow) -> String? {
+        guard m.requestedDelivery == .steer else { return nil }
+        switch m.actualDelivery {
+        case .steer?:
+            return "立即引导，已注入第 \(m.codexTurnID ?? "？") 轮（\(m.codexHookEvent ?? "？")）"
+        case .queue?:
+            return "要求立即引导，实际排队"
+        case nil:
+            return m.status == .steerWaiting ? "立即引导，等注入" : "要求立即引导，没有送进去"
         }
     }
 
@@ -436,8 +640,12 @@ public final class RelayService: @unchecked Sendable {
         lines.append("本小时全部还能发 \(totalLeft) 封" + (pairs.isEmpty ? "。" : "；" + pairs.joined(separator: "，") + "。"))
         let mine = try store.recentMessages(limit: 50).filter { $0.fromSession == me.id }.prefix(5)
         if !mine.isEmpty {
-            let names: [MessageStatus: String] = [.queued: "已排队", .retrying: "重试中", .pending: "待对方读取", .read: "对方已读", .failed: "投递失败"]
-            lines.append("最近发出的信：" + mine.map { "\($0.id) → \($0.toMailbox)：\(names[$0.status] ?? $0.status.rawValue)" }.joined(separator: "；"))
+            lines.append("最近发出的信：" + mine.map { m in
+                var line = "\(m.id) → \(m.toMailbox)：\(Self.statusName(m.status))"
+                if let how = Self.deliveryReceipt(m) { line += "（\(how)）" }
+                if m.repliedAt != nil { line += "，已回信" }
+                return line
+            }.joined(separator: "；"))
         }
         var r = WireResult(text: "")
         if me.platform == .claude {
@@ -450,6 +658,20 @@ public final class RelayService: @unchecked Sendable {
         r.unread = unread
         r.contacts = contacts
         return r
+    }
+
+    /// 给会话看的状态名
+    public static func statusName(_ s: MessageStatus) -> String {
+        switch s {
+        case .queued: return "已排队"
+        case .retrying: return "重试中"
+        case .pending: return "待对方读取"
+        case .read: return "对方已读"
+        case .failed: return "投递失败"
+        case .steerWaiting: return "等注入"
+        case .injected: return "已注入，待对方读取"
+        case .unknown: return "结果未知"
+        }
     }
 
     // MARK: 用户操作（第 2 步由 relayd 控制台调用，第 3 步由界面调用）
@@ -480,6 +702,9 @@ public final class RelayService: @unchecked Sendable {
 
     // MARK: 定时检查
 
+    /// Codex 队列在用户停止（或 ChatGPT 重启）后的实际行为：只停到下一次有任何一轮正常结束（调研报告第 6.2 节 B 段、T10b）
+    static let pausedQueueHint = "在那个会话里点“继续”，或者自己再发一条消息并等它回复完，排着的传话就会自动接着执行；不想让它们执行，请在那个会话的界面上删掉这些排队消息。"
+
     /// 由宿主每 30 秒左右调用一次
     public func runPeriodicChecks() {
         let now = clock()
@@ -499,8 +724,21 @@ public final class RelayService: @unchecked Sendable {
         for m in (try? store.awaitingReply(createdBefore: now.addingTimeInterval(-limits.replyStaleAfter))) ?? [] {
             try? store.flagStale(id: m.id)
             var text = "\(m.id)（\(m.fromMailbox) → \(m.toMailbox)）发出 \(Int(limits.replyStaleAfter / 60)) 分钟还没等到回信，可能卡住：对方可能在忙"
-            if m.toPlatform == .codex { text += "；也可能是 Codex 队列暂停了，需要到那个会话点“继续”" }
+            if m.toPlatform == .codex && m.actualDelivery != .steer { text += "；也可能是你在那个会话里按了停止，排着的传话暂停了。" + Self.pausedQueueHint }
             alert("可能卡住", text)
+        }
+
+        // 引导信等不到注入：超时，或者对方的 Codex 后台服务已经退出（不转排队）
+        for m in (try? store.allSteerWaiting()) ?? [] {
+            var why: String?
+            if now.timeIntervalSince(m.createdAt) >= Self.steerWaitTimeout {
+                why = "\(Int(Self.steerWaitTimeout / 60)) 分钟内没能注入（对方可能在跑很长的命令，或者 Codex 卡住了）"
+            } else if let to = try? store.session(id: m.toSession),
+                      let pid = (try? store.codexTurn(sessionID: to.sessionID))?.hostPID, !hostAlive(pid) {
+                why = "对方的 Codex 后台服务退出或重启了"
+            }
+            guard let why, let failed = try? store.failSteerWaiting([m.id], reason: why + "，没有送进去（不转排队）", at: now), !failed.isEmpty else { continue }
+            alert("引导未送达", "\(m.id)（\(m.fromMailbox) → \(m.toMailbox)）没有送进去：\(why)。没有自动改为排队")
         }
 
         // Claude 有未读但没在等信（设计方案第 11.2 节第 3 点）
@@ -518,7 +756,7 @@ public final class RelayService: @unchecked Sendable {
             let boxes = (try? store.codexMailboxesAwaitingReply(since: now.addingTimeInterval(-limits.restartLookback))) ?? []
             if !boxes.isEmpty {
                 let what = pid == nil ? "ChatGPT 的 Codex 后台服务退出了" : "ChatGPT 重启过"
-                alert("Codex 重启", "\(what)。\(boxes.joined(separator: "、")) 如果当时正在执行，它的传话队列会暂停，请到那个会话点“继续”")
+                alert("Codex 重启", "\(what)。\(boxes.joined(separator: "、")) 如果当时正在执行，排着的传话会暂停。" + Self.pausedQueueHint)
             }
         }
         appServerSeen = true

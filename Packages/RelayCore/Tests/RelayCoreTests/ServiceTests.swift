@@ -46,6 +46,8 @@ final class Harness: @unchecked Sendable {
     let now = Box(Date())
     let notices = Box<[Notice]>([])
     let appServer = Box<pid_t?>(100)
+    /// 还活着的 Codex 后台服务进程号（钩子上报时记下的）
+    let aliveHosts = Box<Set<pid_t>>([4242])
     var service: RelayService!
     let dirA: String, dirB: String, dirOther: String
 
@@ -79,7 +81,8 @@ final class Harness: @unchecked Sendable {
             paths: paths, store: store, registry: registry,
             resolver: IdentityResolver(locator: SessionRecordLocator(paths: fx.external)), limits: limitsSource,
             dispatcher: CodexDispatcher(queuer: codex, retryDelays: retryDelays), waits: waits,
-            appServerPID: { [appServer] in appServer.get() }, clock: { [now] in now.get() },
+            appServerPID: { [appServer] in appServer.get() }, hostAlive: { [aliveHosts] in aliveHosts.get().contains($0) },
+            clock: { [now] in now.get() },
             notify: { [notices] n in notices.update { $0.append(n) } })
         // 会话记录：1、2 是 Codex（项目甲、项目乙），11、12 是 Claude（项目甲），21 是别组 Claude
         try fx.addCodex(sampleID(1), cwd: dirA)

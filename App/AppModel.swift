@@ -32,6 +32,10 @@ final class AppModel {
     var integrationBusy: Set<Platform> = []
     /// 最近的配置改动记录
     var configChanges: [ConfigChangeRow] = []
+    /// Codex 钩子（立即引导）：全局一份，加上装过钩子的项目文件夹
+    var hookStatuses: [HookStatus] = []
+    var hookBusy = false
+    var hookReport: IntegrationReport?
     /// 完全卸载进行到哪一步、每步的结果
     var uninstallPhase: UninstallPhase = .idle
     var uninstallSteps: [UninstallStep] = []
@@ -159,6 +163,43 @@ extension AppModel {
                 self.integrationReports[p] = report
                 self.integrationStatus[p] = st
                 self.integrationBusy.remove(p)
+                self.configChanges = (try? self.store?.configChanges(limit: 20)) ?? []
+            }
+        }
+    }
+
+    /// 在后台查钩子的安装状态（全局和装过钩子的项目文件夹）
+    func refreshHooks() {
+        guard let integrations = runtime.integrations, !hookBusy else { return }
+        hookBusy = true
+        Task.detached {
+            let list = [integrations.hookStatus(.global)] + integrations.projectHookScopes().map { integrations.hookStatus($0) }
+            await MainActor.run { [weak self] in
+                self?.hookStatuses = list
+                self?.hookBusy = false
+            }
+        }
+    }
+
+    /// 在后台安装、核对或移除钩子，做完再查一次
+    func runHooks(_ op: IntegrationOperation, scope: HookScope) {
+        guard let integrations = runtime.integrations, !hookBusy else { return }
+        hookBusy = true
+        hookReport = nil
+        let store = store
+        Task.detached {
+            let report: IntegrationReport
+            switch op {
+            case .install: report = integrations.installHooks(scope)
+            case .verify: report = integrations.verifyHooks(scope, lastReport: try? store?.lastHookReport())
+            case .uninstall: report = integrations.uninstallHooks(scope)
+            }
+            let list = [integrations.hookStatus(.global)] + integrations.projectHookScopes().map { integrations.hookStatus($0) }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.hookReport = report
+                self.hookStatuses = list
+                self.hookBusy = false
                 self.configChanges = (try? self.store?.configChanges(limit: 20)) ?? []
             }
         }

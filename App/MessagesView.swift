@@ -60,7 +60,8 @@ struct MessagesView: View {
                            options: [(String?.none, "全部会话")] + mailboxes.map { (Optional($0), $0) })
                 MenuPicker(selection: $statusFilter,
                            options: [(MessageStatus?.none, "全部状态")]
-                               + [MessageStatus.queued, .retrying, .pending, .read, .failed].map { (Optional($0), Format.status($0)) })
+                               + [MessageStatus.queued, .retrying, .pending, .steerWaiting, .injected, .read, .unknown, .failed]
+                                   .map { (Optional($0), Format.status($0)) })
                 Spacer(minLength: 0)
             }
             HStack(spacing: 10) {
@@ -287,6 +288,10 @@ private struct LetterCard: View {
                 }
             }
             GridRow {
+                label("投递方式")
+                Text(Format.delivery(message)).foregroundStyle(Palette.ink2).textSelection(.enabled)
+            }
+            GridRow {
                 label("回信")
                 HStack(spacing: 10) {
                     Text(message.needsReply ? "需要回信" : "不需要回信")
@@ -319,13 +324,19 @@ private struct DeliveryTimeline: View {
     private var steps: [(title: String, state: StepState, text: String)] {
         let m = message
         var list: [(String, StepState, String)] = [("发出", .done, Format.time(m.createdAt))]
-        let deliverTitle = m.toPlatform == .codex ? "排进 Codex 队列" : "放进信箱"
+        let steered = m.requestedDelivery == .steer && m.actualDelivery != .queue
+        let deliverTitle = steered ? "注入对方这一轮" : m.toPlatform == .codex ? "排进 Codex 队列" : "放进信箱"
         if let t = m.deliveredAt {
-            list.append((deliverTitle, .done, Format.time(t)))
+            let hook = steered ? m.codexHookEvent.map { "，由 \($0) 钩子" } ?? "" : ""
+            list.append((deliverTitle, .done, Format.time(t) + hook))
         } else if m.status == .failed {
             list.append((deliverTitle, .failed, "没有送到"))
         } else if m.status == .retrying {
             list.append((deliverTitle, .warning, "正在重试"))
+        } else if m.status == .unknown {
+            list.append((deliverTitle, .warning, "结果未知，没有重试"))
+        } else if m.status == .steerWaiting {
+            list.append((deliverTitle, .waiting, "等对方下一个动作"))
         } else {
             list.append((deliverTitle, .waiting, "还没送到"))
         }

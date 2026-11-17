@@ -23,9 +23,9 @@ struct SocketTests {
         let t = try TempDir()
         let paths = RelayPaths.resolve(environment: ["AGENTRELAY_HOME": t.path + "/h"])
         let rejects = Box<[String]>([])
-        let s = SocketServer(paths: paths, policy: policy, onReject: { m in rejects.update { $0.append(m) } }) { req, platform in
+        let s = SocketServer(paths: paths, policy: policy, onReject: { m in rejects.update { $0.append(m) } }) { req, peer in
             var r = WireResult(text: "收到 \(req.op.rawValue)")
-            r.mailbox = platform?.rawValue ?? "放宽"
+            r.mailbox = peer.platform?.rawValue ?? "放宽"
             return .success(r)
         }
         try s.start()
@@ -65,6 +65,20 @@ struct SocketTests {
         let r = SocketClient.send(op: .status, caller: CallerInfo(cwd: "/"), args: WireArgs(), paths: paths)
         #expect(r.error?.code == .identityMismatch)
         #expect(rejects.get().count == 1)
+    }
+
+    @Test("对端程序和操作：relay-hook 只能上报钩子事件，relay-mcp 不能冒充钩子")
+    func peerOps() {
+        let hook = VerifiedPeer(platform: .codex, program: .relayHook, hostPID: 1)
+        let mcp = VerifiedPeer(platform: .codex, program: .relayMCP, hostPID: 1)
+        #expect(hook.allows(.hook))
+        for op in [WireOp.register, .contacts, .send, .inbox, .status] {
+            #expect(!hook.allows(op))
+            #expect(mcp.allows(op))
+            #expect(VerifiedPeer.relaxed.allows(op))
+        }
+        #expect(!mcp.allows(.hook))
+        #expect(VerifiedPeer.relaxed.allows(.hook))
     }
 
     @Test("中转核心没运行：RELAY_NOT_RUNNING")

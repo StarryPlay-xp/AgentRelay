@@ -89,4 +89,10 @@ public struct CodexAppServer: Sendable, Equatable {
         }
         return found.first { $0.executable.contains("/ChatGPT.app/") } ?? found.first
     }
+
+    /// 这个进程号现在还是不是本用户的 codex 程序（钩子上报时记下的后台服务是否还在）
+    public static func isAlive(pid: pid_t) -> Bool {
+        guard pid > 0, Processes.owner(of: pid) == getuid(), let path = Processes.executablePath(pid) else { return false }
+        return (path as NSString).lastPathComponent == "codex"
+    }
 }

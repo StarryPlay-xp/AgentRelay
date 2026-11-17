@@ -47,6 +47,24 @@ public enum MessageStatus: String, Codable, Sendable {
     case read
     /// 投递失败
     case failed
+    /// 立即引导：中转核心已接受，等对方下一个动作之前注入
+    case steerWaiting = "steer_waiting"
+    /// 立即引导：已注入对方正在进行的一轮，等对方用 relay_inbox 读取
+    case injected
+    /// 结果未知（例如排队命令超时、又没能核对），需要人去看
+    case unknown
+}
+
+/// 投递方式：排队（对方这一轮结束后新开一轮处理）或立即引导（注入对方正在进行的一轮）
+public enum DeliveryMode: String, Codable, Sendable {
+    case queue
+    case steer
+}
+
+/// 立即引导送不进去时怎么办：默认不降级；`queue` 表示改为排队，回执里写明实际用了排队
+public enum SteerFallback: String, Codable, Sendable {
+    case none
+    case queue
 }
 
 public struct MessageRow: Sendable, Equatable {
@@ -72,6 +90,14 @@ public struct MessageRow: Sendable, Equatable {
     public let readAt: Date?
     public let repliedAt: Date?
     public let staleFlagged: Bool
+    /// 发信方要求的投递方式（旧信没有这一列，按排队算）
+    public let requestedDelivery: DeliveryMode
+    /// 实际采用的投递方式；还没投出去时为 nil
+    public let actualDelivery: DeliveryMode?
+    /// 引导信被注入到对方的哪一轮
+    public let codexTurnID: String?
+    /// 引导信由哪个钩子注入：PreToolUse / PostToolUse / Stop
+    public let codexHookEvent: String?
 }
 
 /// 写信时的输入，编号由信件库分配
@@ -86,9 +112,12 @@ public struct MessageDraft: Sendable {
     public var needsReply: Bool
     public var status: MessageStatus
     public var createdAt: Date
+    public var requestedDelivery: DeliveryMode
+    public var actualDelivery: DeliveryMode?
 
     public init(chainID: String?, hop: Int, from: SessionRow, to: SessionRow, replyTo: String?, subject: String?,
-                body: String, needsReply: Bool, status: MessageStatus, createdAt: Date) {
+                body: String, needsReply: Bool, status: MessageStatus, createdAt: Date,
+                requestedDelivery: DeliveryMode = .queue, actualDelivery: DeliveryMode? = nil) {
         self.chainID = chainID
         self.hop = hop
         self.from = from
@@ -99,7 +128,20 @@ public struct MessageDraft: Sendable {
         self.needsReply = needsReply
         self.status = status
         self.createdAt = createdAt
+        self.requestedDelivery = requestedDelivery
+        self.actualDelivery = actualDelivery
     }
+}
+
+/// Codex 会话的轮次状态，由 relay-hook 上报（立即引导用来判断对方是否正在一轮里）
+public struct CodexTurnState: Sendable, Equatable {
+    public let sessionID: String
+    public let turnID: String?
+    /// 正在一轮里（上报 UserPromptSubmit、PreToolUse、PostToolUse 后为真；放行结束、中断后为假）
+    public let active: Bool
+    public let updatedAt: Date
+    /// 上报时运行钩子的 Codex 后台服务进程号；它退出了，这份状态就作废
+    public let hostPID: Int32?
 }
 
 public struct EventRow: Sendable, Equatable {
@@ -217,7 +259,22 @@ public final class Store: @unchecked Sendable {
             ok INTEGER NOT NULL
         );
         """)
-        try db.execute("UPDATE meta SET value = '3' WHERE key = 'schema_version'")
+        // 第 4 版：投递方式（排队 / 立即引导）和引导信的注入记录；Codex 会话的轮次状态
+        let messageColumns = try db.query("PRAGMA table_info(messages)").compactMap { $0.string("name") }
+        for (name, type) in [("requested_delivery", "TEXT"), ("actual_delivery", "TEXT"), ("codex_turn_id", "TEXT"), ("codex_hook_event", "TEXT")]
+        where !messageColumns.contains(name) {
+            try db.execute("ALTER TABLE messages ADD COLUMN \(name) \(type)")
+        }
+        try db.execute("""
+        CREATE TABLE IF NOT EXISTS codex_turns (
+            session_id TEXT PRIMARY KEY,
+            turn_id TEXT,
+            active INTEGER NOT NULL,
+            updated_at REAL NOT NULL,
+            host_pid INTEGER
+        );
+        """)
+        try db.execute("UPDATE meta SET value = '4' WHERE key = 'schema_version'")
     }
 
     /// 提前关闭数据库（完全卸载删除数据文件之前用）；关闭后再调用任何方法都会报错
@@ -300,7 +357,7 @@ public final class Store: @unchecked Sendable {
                 try db.query("UPDATE sessions SET status = 'active', last_active_at = ? WHERE id = ?", [SQLValue(now), .int(new)])
                 // 还没读的信改寄给新会话
                 if let old {
-                    try db.query("UPDATE messages SET to_session = ? WHERE to_session = ? AND status IN ('pending', 'retrying')",
+                    try db.query("UPDATE messages SET to_session = ? WHERE to_session = ? AND status IN ('pending', 'retrying', 'injected')",
                                  [.int(new), .int(old)])
                 }
             }
@@ -339,12 +396,14 @@ public final class Store: @unchecked Sendable {
                 }
                 try db.query("""
                 INSERT INTO messages (id, chain_id, hop, from_session, to_session, from_mailbox, to_mailbox, from_platform,
-                                      to_platform, from_project, reply_to, subject, body, needs_reply, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      to_platform, from_project, reply_to, subject, body, needs_reply, status, created_at,
+                                      requested_delivery, actual_delivery)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, [.text(id), .text(chain!), .int(d.hop), .int(d.from.id), .int(d.to.id), .text(d.from.mailbox),
                       .text(d.to.mailbox), .text(d.from.platform.rawValue), .text(d.to.platform.rawValue),
                       .text(d.from.project), SQLValue(d.replyTo), SQLValue(d.subject), .text(d.body), SQLValue(d.needsReply),
-                      .text(d.status.rawValue), SQLValue(d.createdAt)])
+                      .text(d.status.rawValue), SQLValue(d.createdAt), .text(d.requestedDelivery.rawValue),
+                      SQLValue(d.actualDelivery?.rawValue)])
                 return try messageRows("WHERE id = ?", [.text(id)])[0]
             }
         }
@@ -354,14 +413,15 @@ public final class Store: @unchecked Sendable {
         try locked { try messageRows("WHERE id = ?", [.text(id)]).first }
     }
 
-    /// 等某个会话读取的信，按时间先后
+    /// 等某个会话读取的信（含已注入的引导信），按时间先后
     public func unread(toSession id: Int) throws -> [MessageRow] {
-        try locked { try messageRows("WHERE to_session = ? AND status = 'pending' ORDER BY created_at, id", [.int(id)]) }
+        try locked { try messageRows("WHERE to_session = ? AND status IN ('pending', 'injected') ORDER BY created_at, id", [.int(id)]) }
     }
 
     public func unreadCount(toSession id: Int) throws -> Int {
         try locked {
-            try db.query("SELECT COUNT(*) AS n FROM messages WHERE to_session = ? AND status = 'pending'", [.int(id)])[0].int("n") ?? 0
+            try db.query("SELECT COUNT(*) AS n FROM messages WHERE to_session = ? AND status IN ('pending', 'injected')",
+                         [.int(id)])[0].int("n") ?? 0
         }
     }
 
@@ -369,20 +429,94 @@ public final class Store: @unchecked Sendable {
         try locked {
             try db.transaction {
                 for id in ids {
-                    try db.query("UPDATE messages SET status = 'read', read_at = ? WHERE id = ? AND status = 'pending'",
+                    try db.query("UPDATE messages SET status = 'read', read_at = ? WHERE id = ? AND status IN ('pending', 'injected')",
                                  [SQLValue(now), .text(id)])
                 }
             }
         }
     }
 
-    public func updateDelivery(id: String, status: MessageStatus, queueRef: String? = nil, error: String? = nil, at now: Date) throws {
+    /// - Parameter actual: 实际采用的投递方式；nil 表示不改
+    public func updateDelivery(id: String, status: MessageStatus, queueRef: String? = nil, error: String? = nil,
+                               actual: DeliveryMode? = nil, at now: Date) throws {
         try locked {
-            let delivered: SQLValue = (status == .queued || status == .pending) ? SQLValue(now) : .null
+            let delivered: SQLValue = (status == .queued || status == .pending || status == .injected) ? SQLValue(now) : .null
             try db.query("""
             UPDATE messages SET status = ?, queue_ref = COALESCE(?, queue_ref), error = ?,
-                delivered_at = COALESCE(?, delivered_at) WHERE id = ?
-            """, [.text(status.rawValue), SQLValue(queueRef), SQLValue(error), delivered, .text(id)])
+                delivered_at = COALESCE(?, delivered_at), actual_delivery = COALESCE(?, actual_delivery) WHERE id = ?
+            """, [.text(status.rawValue), SQLValue(queueRef), SQLValue(error), delivered, SQLValue(actual?.rawValue), .text(id)])
+        }
+    }
+
+    // MARK: 立即引导
+
+    /// 等注入某个会话的引导信，按时间先后
+    public func steerWaiting(toSession id: Int) throws -> [MessageRow] {
+        try locked { try messageRows("WHERE to_session = ? AND status = 'steer_waiting' ORDER BY created_at, id", [.int(id)]) }
+    }
+
+    /// 所有等注入的引导信（定时检查超时用）
+    public func allSteerWaiting() throws -> [MessageRow] {
+        try locked { try messageRows("WHERE status = 'steer_waiting' ORDER BY created_at, id", []) }
+    }
+
+    /// 认领引导信：只认领仍在等注入的，返回真正认领到的那些（同一封信只会被认领一次）
+    public func claimSteer(_ ids: [String], turnID: String?, event: String, at now: Date) throws -> [MessageRow] {
+        try locked {
+            try db.transaction {
+                var claimed: [String] = []
+                for id in ids {
+                    try db.query("""
+                    UPDATE messages SET status = 'injected', actual_delivery = 'steer', codex_turn_id = ?, codex_hook_event = ?,
+                        delivered_at = ?, error = NULL WHERE id = ? AND status = 'steer_waiting'
+                    """, [SQLValue(turnID), .text(event), SQLValue(now), .text(id)])
+                    if db.changes > 0 { claimed.append(id) }
+                }
+                return try claimed.map { try messageRows("WHERE id = ?", [.text($0)])[0] }
+            }
+        }
+    }
+
+    /// 某一轮里已经注入了几封引导信
+    public func injectedCount(toSession id: Int, turnID: String) throws -> Int {
+        try locked {
+            try db.query("SELECT COUNT(*) AS n FROM messages WHERE to_session = ? AND codex_turn_id = ? AND actual_delivery = 'steer'",
+                         [.int(id), .text(turnID)])[0].int("n") ?? 0
+        }
+    }
+
+    /// 把等注入的引导信标为投递失败（不转排队），返回被标的那些
+    @discardableResult
+    public func failSteerWaiting(_ ids: [String], reason: String, at now: Date) throws -> [MessageRow] {
+        try locked {
+            try db.transaction {
+                var failed: [String] = []
+                for id in ids {
+                    try db.query("UPDATE messages SET status = 'failed', error = ? WHERE id = ? AND status = 'steer_waiting'",
+                                 [.text(reason), .text(id)])
+                    if db.changes > 0 { failed.append(id) }
+                }
+                return try failed.map { try messageRows("WHERE id = ?", [.text($0)])[0] }
+            }
+        }
+    }
+
+    public func codexTurn(sessionID: String) throws -> CodexTurnState? {
+        try locked {
+            try db.query("SELECT * FROM codex_turns WHERE session_id = ?", [.text(sessionID)]).first.map {
+                CodexTurnState(sessionID: $0.string("session_id")!, turnID: $0.string("turn_id"), active: $0.bool("active"),
+                               updatedAt: $0.date("updated_at")!, hostPID: $0.int("host_pid").map { Int32($0) })
+            }
+        }
+    }
+
+    public func setCodexTurn(sessionID: String, turnID: String?, active: Bool, hostPID: Int32?, at now: Date) throws {
+        try locked {
+            try db.query("""
+            INSERT INTO codex_turns (session_id, turn_id, active, updated_at, host_pid) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (session_id) DO UPDATE SET turn_id = excluded.turn_id, active = excluded.active,
+                updated_at = excluded.updated_at, host_pid = excluded.host_pid
+            """, [.text(sessionID), SQLValue(turnID), SQLValue(active), SQLValue(now), hostPID.map { .int(Int($0)) } ?? .null])
         }
     }
 
@@ -442,7 +576,10 @@ public final class Store: @unchecked Sendable {
                 body: r.string("body")!, needsReply: r.bool("needs_reply"),
                 status: MessageStatus(rawValue: r.string("status")!) ?? .failed, queueRef: r.string("queue_ref"),
                 error: r.string("error"), createdAt: r.date("created_at")!, deliveredAt: r.date("delivered_at"),
-                readAt: r.date("read_at"), repliedAt: r.date("replied_at"), staleFlagged: r.bool("stale_flagged"))
+                readAt: r.date("read_at"), repliedAt: r.date("replied_at"), staleFlagged: r.bool("stale_flagged"),
+                requestedDelivery: r.string("requested_delivery").flatMap(DeliveryMode.init(rawValue:)) ?? .queue,
+                actualDelivery: r.string("actual_delivery").flatMap(DeliveryMode.init(rawValue:)),
+                codexTurnID: r.string("codex_turn_id"), codexHookEvent: r.string("codex_hook_event"))
         }
     }
 

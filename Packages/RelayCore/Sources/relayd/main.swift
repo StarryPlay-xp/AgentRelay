@@ -96,11 +96,13 @@ let codex = CodexCLI(executable: {
 let service = RelayService(
     paths: paths, store: store, registry: registry,
     resolver: IdentityResolver(locator: SessionRecordLocator(paths: ExternalPaths.resolve(environment: env))),
-    dispatcher: CodexDispatcher(queuer: codex), handoffHint: { "确认请在 relayd 控制台输入：handoff \($0)" }, notify: notify)
+    dispatcher: CodexDispatcher(queuer: codex, checker: CodexAppServerQueueChecker(
+        codexHome: CodexAppServerQueueChecker.defaultCodexHome(environment: env), executable: codex.executable)),
+    handoffHint: { "确认请在 relayd 控制台输入：handoff \($0)" }, notify: notify)
 
 let policy: PeerPolicy = relaxed ? .relaxed : .strict(relayMCP: paths.bin + "/relay-mcp")
-let server = SocketServer(paths: paths, policy: policy, onReject: { notify(Notice(kind: "拒绝", text: $0)) }) { req, platform in
-    service.handle(req, peerPlatform: platform)
+let server = SocketServer(paths: paths, policy: policy, onReject: { notify(Notice(kind: "拒绝", text: $0)) }) { req, peer in
+    service.handle(req, peer: peer)
 }
 do { try server.start() } catch {
     say("启动失败：\(error)")
@@ -140,7 +142,6 @@ if console { say("输入 help 查看命令。") }
 
 // MARK: 控制台
 
-let statusNames: [MessageStatus: String] = [.queued: "已排队", .retrying: "重试中", .pending: "待读", .read: "已读", .failed: "失败"]
 
 func runCommand(_ line: String) {
     let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
@@ -166,7 +167,8 @@ func runCommand(_ line: String) {
             if rows.isEmpty { say("还没有信。") }
             for m in rows.reversed() {
                 let preview = m.body.replacingOccurrences(of: "\n", with: " ").prefix(40)
-                say("\(m.id)｜\(stamp(m.createdAt))｜\(m.fromMailbox) → \(m.toMailbox)｜\(m.chainID) 第 \(m.hop) 次｜\(statusNames[m.status] ?? m.status.rawValue)\(m.error.map { "（\($0)）" } ?? "")｜\(preview)")
+                let how = RelayService.deliveryReceipt(m).map { "｜\($0)" } ?? ""
+                say("\(m.id)｜\(stamp(m.createdAt))｜\(m.fromMailbox) → \(m.toMailbox)｜\(m.chainID) 第 \(m.hop) 次｜\(RelayService.statusName(m.status))\(how)\(m.error.map { "（\($0)）" } ?? "")｜\(preview)")
             }
         case "events":
             for e in try store.events(limit: n).reversed() { say("\(stamp(e.time))｜\(e.kind)｜\(e.summary)") }

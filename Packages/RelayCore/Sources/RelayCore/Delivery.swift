@@ -9,12 +9,20 @@ public enum CodexQueueOutcome: Sendable, Equatable {
     case queued(ref: String?)
     /// 这次失败，可以重试
     case failed(String)
-    /// 找不到 codex 程序，重试也没用
+    /// 不知道排没排进去（例如 codex queue 超时：信可能已经进了队列）。Codex 不按编号去重，不能盲目重试
+    case unknown(String)
+    /// 找不到 codex 程序，或者 codex 明确拒绝（例如本机有共享后台服务），重试也没用
     case unavailable(String)
 }
 
 public protocol CodexQueueing: Sendable {
     func enqueue(threadID: String, message: String) -> CodexQueueOutcome
+}
+
+/// 结果未知时核对：这封信有没有已经排进对方的队列（或者已经被执行）
+public protocol CodexQueueChecking: Sendable {
+    /// 找到返回 true，确定没有返回 false，查不了返回 nil
+    func contains(threadID: String, messageID: String) -> Bool?
 }
 
 /// 调用 ChatGPT 内置的 codex 程序：`codex queue --thread <编号> --message <内容>`，不加 `--resume`。
@@ -48,8 +56,13 @@ public struct CodexCLI: CodexQueueing {
         guard let exe = executable(), FileManager.default.isExecutableFile(atPath: exe) else { return .unavailable("找不到 codex 程序（ChatGPT 桌面版没装，或者路径不对）") }
         let (status, output) = Self.run(exe, ["queue", "--thread", threadID, "--message", message], timeout: timeout)
         guard status == 0 else {
+            if status == -1 { return .unknown("codex queue \(Int(timeout)) 秒没有结束") }
             let brief = output.split(separator: "\n").first.map(String.init) ?? ""
-            return .failed(status == -1 ? "codex queue 超时" : "codex queue 退出码 \(status)：\(brief.prefix(200))")
+            // 本机有共享后台服务时 codex queue 拒绝用内嵌服务排队：原样告诉用户，不换别的方式绕过
+            if output.contains("app-server daemon is running") {
+                return .unavailable("本机有 Codex 共享后台服务在运行，codex queue 拒绝排队（\(brief.prefix(200))）")
+            }
+            return .failed("codex queue 退出码 \(status)：\(brief.prefix(200))")
         }
         return .queued(ref: Self.parseQueueRef(output))
     }
@@ -89,14 +102,29 @@ public final class CodexDispatcher: @unchecked Sendable {
     public typealias Report = @Sendable (_ messageID: String, _ outcome: CodexQueueOutcome, _ final: Bool) -> Void
 
     private let queuer: CodexQueueing
+    private let checker: CodexQueueChecking?
     private let retryDelays: [TimeInterval]
     private let lock = NSLock()
     private var queues: [String: DispatchQueue] = [:]
 
-    /// - Parameter retryDelays: 失败后每次重试前等多久（默认 5、15、45 秒）
-    public init(queuer: CodexQueueing, retryDelays: [TimeInterval] = [5, 15, 45]) {
+    /// - Parameters:
+    ///   - checker: 结果未知时用来核对；没有时结果未知就停在“结果未知”，不重试
+    ///   - retryDelays: 失败后每次重试前等多久（默认 5、15、45 秒）
+    public init(queuer: CodexQueueing, checker: CodexQueueChecking? = nil, retryDelays: [TimeInterval] = [5, 15, 45]) {
         self.queuer = queuer
+        self.checker = checker
         self.retryDelays = retryDelays
+    }
+
+    /// 排一次；结果未知时先核对：找到了算排进去，确定没有才当作失败（之后照常重试），查不了就停在“结果未知”
+    private func attempt(messageID: String, threadID: String, text: String) -> CodexQueueOutcome {
+        let outcome = queuer.enqueue(threadID: threadID, message: text)
+        guard case .unknown(let why) = outcome else { return outcome }
+        switch checker?.contains(threadID: threadID, messageID: messageID) {
+        case true?: return .queued(ref: nil)
+        case false?: return .failed(why + "，核对后确认没有排进去")
+        case nil: return .unknown(why + "，也没能核对")
+        }
     }
 
     private func queue(for thread: String) -> DispatchQueue {
@@ -111,7 +139,7 @@ public final class CodexDispatcher: @unchecked Sendable {
     /// 投递一封信：第一次尝试同步完成并返回结果；失败时在后台按间隔重试，每次结果通过 `report` 告知。
     public func deliver(messageID: String, threadID: String, text: String, report: @escaping Report) -> CodexQueueOutcome {
         let q = queue(for: threadID)
-        let first = q.sync { queuer.enqueue(threadID: threadID, message: text) }
+        let first = q.sync { attempt(messageID: messageID, threadID: threadID, text: text) }
         if case .failed = first, !retryDelays.isEmpty {
             scheduleRetry(attempt: 0, messageID: messageID, threadID: threadID, text: text, queue: q, report: report)
         } else {
@@ -122,7 +150,7 @@ public final class CodexDispatcher: @unchecked Sendable {
 
     private func scheduleRetry(attempt: Int, messageID: String, threadID: String, text: String, queue: DispatchQueue, report: @escaping Report) {
         queue.asyncAfter(deadline: .now() + retryDelays[attempt]) { [self] in
-            let outcome = queuer.enqueue(threadID: threadID, message: text)
+            let outcome = self.attempt(messageID: messageID, threadID: threadID, text: text)
             let isLast = attempt + 1 >= retryDelays.count
             if case .failed = outcome, !isLast {
                 report(messageID, outcome, false)

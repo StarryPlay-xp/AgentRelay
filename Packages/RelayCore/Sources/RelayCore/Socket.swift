@@ -54,7 +54,7 @@ enum UnixSocket {
 /// 中转核心一侧的本机通话口（设计方案第 15 节）：只在本机文件系统里，不开网络端口；
 /// 文件 0600；每个连接先核对对端，再核对暗号和版本。
 public final class SocketServer: @unchecked Sendable {
-    public typealias Handler = @Sendable (WireRequest, Platform?) -> WireResponse
+    public typealias Handler = @Sendable (WireRequest, VerifiedPeer) -> WireResponse
 
     private let paths: RelayPaths
     private let policy: PeerPolicy
@@ -146,9 +146,9 @@ public final class SocketServer: @unchecked Sendable {
         let response: WireResponse
         do {
             let peer = try PeerCheck.peer(of: fd)
-            let platform: Platform?
+            let verified: VerifiedPeer
             do {
-                platform = try PeerCheck.verify(peer, policy: policy)
+                verified = try PeerCheck.verify(peer, policy: policy)
             } catch let e as RelayError {
                 onReject("拒绝连接：\(e.message)（对端进程 \(peer.pid)）")
                 throw e
@@ -170,7 +170,11 @@ public final class SocketServer: @unchecked Sendable {
                 onReject("拒绝请求：暗号不对（对端进程 \(peer.pid)）")
                 throw RelayError(.identityMismatch, "暗号不对")
             }
-            response = handler(request, platform)
+            guard verified.allows(request.op) else {
+                onReject("拒绝请求：\(verified.program?.rawValue ?? "对端") 不能调用 \(request.op.rawValue)（对端进程 \(peer.pid)）")
+                throw RelayError(.identityMismatch, "这个程序不能调用 \(request.op.rawValue)")
+            }
+            response = handler(request, verified)
         } catch let e as RelayError {
             response = .failure(e)
         } catch {

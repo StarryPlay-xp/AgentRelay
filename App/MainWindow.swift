@@ -201,7 +201,16 @@ enum Format {
         case .pending: return "待读"
         case .read: return "已读"
         case .failed: return "投递失败"
+        case .steerWaiting: return "等注入"
+        case .injected: return "已注入"
+        case .unknown: return "结果未知"
         }
+    }
+
+    /// 投递方式：排队、立即引导（注入到哪一轮）、要求引导但实际排队
+    static func delivery(_ m: MessageRow) -> String {
+        if let steer = RelayService.deliveryReceipt(m) { return steer }
+        return m.toPlatform == .codex ? "排队" : "放进信箱"
     }
 
     static func session(_ s: SessionStatus) -> String {

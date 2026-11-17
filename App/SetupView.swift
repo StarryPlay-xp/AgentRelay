@@ -18,6 +18,8 @@ struct SetupView: View {
                 .padding(.bottom, 20)
                 PlatformSetup(model: model, platform: .codex)
                 Hairline()
+                CodexHooksSetup(model: model)
+                Hairline()
                 PlatformSetup(model: model, platform: .claude)
                 Hairline()
                 RuleSentence()
@@ -26,7 +28,109 @@ struct SetupView: View {
             }
             .pagePadding()
         }
-        .onAppear { model.refreshIntegrations() }
+        .onAppear {
+            model.refreshIntegrations()
+            model.refreshHooks()
+        }
+    }
+}
+
+// MARK: - Codex 钩子（立即引导）
+
+private struct CodexHooksSetup: View {
+    @Bindable var model: AppModel
+    @State private var confirmRemove: HookStatus?
+
+    private var global: HookStatus? { model.hookStatuses.first { $0.scope == .global } }
+    private var projects: [HookStatus] { model.hookStatuses.filter { $0.scope != .global } }
+
+    var body: some View {
+        SettingsBlock(title: "Codex 立即引导（钩子）",
+                      note: "装上后，别的会话发信时可以选“立即引导”：对方下一次开始新动作之前被拦下、先收到通知。钩子要你本人在 Codex 里信任后才会运行。") {
+            if global == nil || model.hookBusy && model.hookStatuses.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在检查…").font(Fonts.body).foregroundStyle(Palette.ink2)
+                }
+            } else {
+                if let global { scopeRow(global) }
+                ForEach(projects, id: \.file) { scopeRow($0) }
+                if let global, global.state != .installed, let i = model.runtime.integrations {
+                    PreviewBox(preview: i.hookPreview(.global))
+                }
+                HStack(spacing: 10) {
+                    Button("只装到一个项目文件夹（测试用）…") { pickProject() }
+                        .buttonStyle(.inkOutline).disabled(model.hookBusy)
+                    if model.hookBusy { ProgressView().controlSize(.small) }
+                    Spacer(minLength: 0)
+                }
+                if let report = model.hookReport { ReportBox(report: report) }
+            }
+        }
+        .confirmationDialog("移除 AgentRelay 的钩子？", isPresented: Binding(get: { confirmRemove != nil }, set: { if !$0 { confirmRemove = nil } }),
+                            presenting: confirmRemove) { st in
+            Button("移除", role: .destructive) { model.runHooks(.uninstall, scope: st.scope) }
+        } message: { st in
+            Text("只移除本数据目录加的那几条；\(st.file) 装后没被改过时，用改前备份逐字还原。Codex 里的信任记录要你自己在“设置 › Hooks”里清理。")
+        }
+    }
+
+    private func title(_ s: HookStatus) -> String {
+        switch s.scope {
+        case .global: return "全局"
+        case .project(let dir): return "项目 \((dir as NSString).lastPathComponent)"
+        }
+    }
+
+    private func stateText(_ s: HookInstallState) -> (String, Color) {
+        switch s {
+        case .installed: return ("已装上（还要在 Codex 里信任）", Palette.ok)
+        case .notInstalled: return ("没装", Palette.ink3)
+        case .partial(let missing): return ("只装了一部分，缺 \(missing.joined(separator: "、"))", Palette.warn)
+        case .unknown(let why): return (why, Palette.bad)
+        }
+    }
+
+    @ViewBuilder private func scopeRow(_ st: HookStatus) -> some View {
+        let (text, color) = stateText(st.state)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Circle().fill(color).frame(width: 7, height: 7)
+                Text(title(st)).font(Fonts.rowTitle).foregroundStyle(Palette.ink)
+                Text(text).font(Fonts.small).foregroundStyle(Palette.ink2)
+                Spacer(minLength: 8)
+                switch st.state {
+                case .notInstalled, .partial:
+                    Button(st.state == .notInstalled ? "备份并安装" : "补齐") { model.runHooks(.install, scope: st.scope) }
+                        .buttonStyle(.inkFilled).disabled(model.hookBusy)
+                    if case .partial = st.state {
+                        Button("移除…") { confirmRemove = st }.buttonStyle(.inkDanger).disabled(model.hookBusy)
+                    }
+                case .installed:
+                    Button("核对") { model.runHooks(.verify, scope: st.scope) }.buttonStyle(.inkOutline).disabled(model.hookBusy)
+                    Button("移除…") { confirmRemove = st }.buttonStyle(.inkDanger).disabled(model.hookBusy)
+                case .unknown:
+                    EmptyView()
+                }
+            }
+            Text(st.file).font(Fonts.mono(12, weight: .regular)).foregroundStyle(Palette.ink2).textSelection(.enabled)
+            ForEach(st.others, id: \.self) { other in
+                Text("这个文件里还有别的 AgentRelay 数据目录装的钩子（\(other)），不动它。")
+                    .font(Fonts.small).foregroundStyle(Palette.ink3).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func pickProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "装到这个文件夹"
+        panel.message = "选一个测试项目文件夹：钩子只写进它的 .codex/hooks.json，只对开在这个文件夹里的 Codex 会话生效。"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.runHooks(.install, scope: .project(url.path))
     }
 }
 

@@ -9,6 +9,30 @@ public enum Wire {
 
 public enum WireOp: String, Codable, Sendable {
     case register, contacts, send, inbox, status
+    /// relay-hook 上报 Codex 钩子事件（只允许 relay-hook 调用，见 PeerCheck）
+    case hook
+}
+
+/// relay-hook 从 Codex 钩子输入里取出的几项。只带这几项：不带用户输入的文字、命令内容和工具参数。
+public struct HookEvent: Codable, Sendable, Equatable {
+    /// `hook_event_name`：UserPromptSubmit、PreToolUse、PostToolUse、Stop、Interrupt
+    public var event: String
+    /// `session_id`：Codex 会话编号
+    public var sessionID: String
+    /// `turn_id`：这一轮的编号
+    public var turnID: String?
+    /// `tool_name`：PreToolUse、PostToolUse 才有
+    public var toolName: String?
+    /// `stop_hook_active`：Stop 才有，本轮已经被结束钩子续过一次时为真
+    public var stopHookActive: Bool?
+
+    public init(event: String, sessionID: String, turnID: String? = nil, toolName: String? = nil, stopHookActive: Bool? = nil) {
+        self.event = event
+        self.sessionID = sessionID
+        self.turnID = turnID
+        self.toolName = toolName
+        self.stopHookActive = stopHookActive
+    }
 }
 
 public struct WireArgs: Codable, Sendable, Equatable {
@@ -19,9 +43,16 @@ public struct WireArgs: Codable, Sendable, Equatable {
     public var needsReply: Bool?
     public var subject: String?
     public var markRead: Bool?
+    /// relay_send：投递方式，默认排队
+    public var delivery: DeliveryMode?
+    /// relay_send：立即引导送不进去时怎么办，默认不降级
+    public var steerFallback: SteerFallback?
+    /// relay-hook 上报的钩子事件
+    public var hook: HookEvent?
 
     public init(mailbox: String? = nil, to: String? = nil, body: String? = nil, replyTo: String? = nil,
-                needsReply: Bool? = nil, subject: String? = nil, markRead: Bool? = nil) {
+                needsReply: Bool? = nil, subject: String? = nil, markRead: Bool? = nil,
+                delivery: DeliveryMode? = nil, steerFallback: SteerFallback? = nil, hook: HookEvent? = nil) {
         self.mailbox = mailbox
         self.to = to
         self.body = body
@@ -29,6 +60,9 @@ public struct WireArgs: Codable, Sendable, Equatable {
         self.needsReply = needsReply
         self.subject = subject
         self.markRead = markRead
+        self.delivery = delivery
+        self.steerFallback = steerFallback
+        self.hook = hook
     }
 }
 
@@ -77,6 +111,12 @@ public struct WireResult: Codable, Sendable, Equatable {
     public var delivery: MessageStatus?
     public var messages: [InboxMessage]?
     public var unread: Int?
+    /// relay_send：发信方要求的投递方式
+    public var requestedDelivery: DeliveryMode?
+    /// relay_send：实际采用的投递方式（立即引导要等注入后才确定，见 relay_status）
+    public var actualDelivery: DeliveryMode?
+    /// relay-hook：要打印给 Codex 的钩子输出（JSON 文本）；nil 表示放行、不注入
+    public var hookOutput: String?
 
     public init(text: String) { self.text = text }
 }

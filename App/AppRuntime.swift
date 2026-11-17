@@ -56,10 +56,11 @@ final class AppRuntime {
         do {
             let store = try Store(path: paths.database)
             let codex = CodexCLI(executable: { CodexCLI.locate(configuredPath: store.codexPath()) })
+            let checker = CodexAppServerQueueChecker(codexHome: CodexAppServerQueueChecker.defaultCodexHome(), executable: codex.executable)
             let service = RelayService(
                 paths: paths, store: store, registry: DatabaseRegistry(store: store),
                 resolver: IdentityResolver(locator: SessionRecordLocator(paths: ExternalPaths.resolve())),
-                limits: { store.limits() }, dispatcher: CodexDispatcher(queuer: codex),
+                limits: { store.limits() }, dispatcher: CodexDispatcher(queuer: codex, checker: checker),
                 notify: { notice in
                     Notifier.shared.post(notice)
                     Task { @MainActor [weak self] in self?.onNotice?() }
@@ -69,8 +70,8 @@ final class AppRuntime {
                                           let n = Notice(kind: "拒绝", text: text)
                                           try? store.addEvent(kind: n.kind, summary: n.text, at: Date())
                                           Notifier.shared.post(n)
-                                      }) { req, platform in
-                service.handle(req, peerPlatform: platform)
+                                      }) { req, peer in
+                service.handle(req, peer: peer)
             }
             try server.start()
             self.store = store
@@ -112,14 +113,14 @@ final class AppRuntime {
         AppLog.disabled = true
     }
 
-    /// 在 bin/ 下建指向应用包内两个程序的符号链接（设计方案第 6 节）；链接指错了就改正。返回问题说明，没问题返回 nil。
+    /// 在 bin/ 下建指向应用包内三个程序的符号链接（设计方案第 6 节）；链接指错了就改正。返回问题说明，没问题返回 nil。
     func installHelperLinks() -> String? {
         let bundle = Bundle.main.bundlePath
         if bundle.contains("/AppTranslocation/") {
             return "AgentRelay 现在运行在系统的临时位置（从“下载”等文件夹直接打开时会这样），没有建立程序链接。请把 AgentRelay 拖进“应用程序”文件夹后再打开。"
         }
         let fm = FileManager.default
-        for name in ["relay-mcp", "relay-wait"] {
+        for name in ["relay-mcp", "relay-wait", "relay-hook"] {
             let target = bundle + "/Contents/Helpers/" + name
             let link = paths.bin + "/" + name
             guard fm.isExecutableFile(atPath: target) else { return "应用包里缺少 \(name)，请重新安装 AgentRelay。" }
